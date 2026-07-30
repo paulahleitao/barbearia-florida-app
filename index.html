@@ -51,6 +51,14 @@
   input,select{width:100%;padding:12px;border-radius:8px;border:1px solid var(--line);background:var(--bg-alt);color:var(--ink);font-family:'Inter';font-size:15px;margin-bottom:12px;}
   label.field-label{display:block;font-size:12px;color:var(--ink-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;}
   .datestrip{display:flex;gap:8px;overflow-x:auto;padding-bottom:8px;margin-bottom:16px;}
+  .calnav{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+  .calmonth{font-family:'Oswald';font-weight:600;font-size:16px;text-transform:capitalize;}
+  .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px;}
+  .calgrid-head{color:var(--ink-dim);font-size:11px;text-align:center;margin-bottom:6px;}
+  .calday{aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:8px;background:var(--bg-alt);font-weight:600;font-size:14px;cursor:pointer;border:1px solid transparent;}
+  .calday.muted{opacity:0.25;cursor:default;background:none;}
+  .calday.active{background:var(--gold);color:var(--gold-ink);}
+
   .datebtn{flex:0 0 auto;border:1px solid var(--line);background:var(--bg-alt);color:var(--ink);border-radius:8px;padding:10px 12px;font-family:'Inter';font-size:12px;text-align:center;cursor:pointer;min-width:52px;}
   .datebtn b{display:block;font-size:16px;font-family:'Oswald';margin-top:2px;}
   .datebtn.active{background:var(--gold);color:var(--gold-ink);border-color:var(--gold);}
@@ -316,30 +324,57 @@ function selectClientService(sid){
   go('clientDate');
 }
 
+function capFirst(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
 function renderClientDate(){
   const c = state.client;
-  const barber = db.barbers.find(b=>b.id===c.barberId);
   const service = db.services.find(s=>s.id===c.serviceId);
-  let strip = '';
-  for(let i=0;i<30;i++){
-    const d = addDaysStr(todayStr(), i);
-    const slots = getSlots(c.barberId, d, service.duration);
-    if(slots.length===0) continue;
-    const dd = new Date(d+'T00:00:00');
-    strip += `<div class="datebtn ${c.date===d?'active':''}" onclick="selectClientDate('${d}')">
-      ${dd.toLocaleDateString('pt-BR',{weekday:'short'})}<b>${pad(dd.getDate())}</b>
-    </div>`;
+  const today = new Date(todayStr()+'T00:00:00');
+  const maxDate = new Date(today); maxDate.setDate(maxDate.getDate()+29);
+
+  if(!state.calMonth) state.calMonth = {y: today.getFullYear(), m: today.getMonth()};
+  const {y,m} = state.calMonth;
+  const firstOfMonth = new Date(y,m,1);
+  const startWeekday = firstOfMonth.getDay();
+  const daysInMonth = new Date(y,m+1,0).getDate();
+  const monthMin = today.getFullYear()*12+today.getMonth();
+  const monthMax = maxDate.getFullYear()*12+maxDate.getMonth();
+  const curMonthIdx = y*12+m;
+
+  let cells = '';
+  for(let i=0;i<startWeekday;i++) cells += '<div></div>';
+  for(let day=1; day<=daysInMonth; day++){
+    const d = `${y}-${pad(m+1)}-${pad(day)}`;
+    const dObj = new Date(y,m,day);
+    const inRange = dObj>=today && dObj<=maxDate;
+    const hasSlots = inRange && getSlots(c.barberId, d, service.duration).length>0;
+    cells += `<div class="calday ${hasSlots?'':'muted'} ${c.date===d?'active':''}" ${hasSlots?`onclick="selectClientDate('${d}')"`:''}>${day}</div>`;
   }
-  if(!strip) strip = '<div class="empty">Sem datas disponíveis nos próximos 30 dias.</div>';
+  const weekdayLabels = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  const monthLabel = capFirst(firstOfMonth.toLocaleDateString('pt-BR',{month:'long', year:'numeric'}));
+
   return `
     <div class="topbar"><button class="link-btn" onclick="go('clientService')">‹ Voltar</button></div>
     <div class="content">
       ${steps(2,4)}
       <div class="screen-title">Passo 3 de 4</div>
       <h1 class="page">Escolha o dia</h1>
-      <div class="datestrip">${strip}</div>
-      ${c.date ? '<div class="empty">Toque em continuar para ver horários</div><button class="btn btn-gold" onclick="go(\'clientSlot\')">Continuar</button>' : ''}
+      <div class="calnav">
+        <button class="link-btn" ${curMonthIdx<=monthMin?'disabled style="opacity:0.25"':''} onclick="shiftMonth(-1)">‹</button>
+        <div class="calmonth">${monthLabel}</div>
+        <button class="link-btn" ${curMonthIdx>=monthMax?'disabled style="opacity:0.25"':''} onclick="shiftMonth(1)">›</button>
+      </div>
+      <div class="calgrid calgrid-head">${weekdayLabels.map(w=>`<div>${w}</div>`).join('')}</div>
+      <div class="calgrid">${cells}</div>
+      ${c.date ? '<button class="btn btn-gold" style="margin-top:16px" onclick="go(\'clientSlot\')">Continuar</button>' : ''}
     </div>`;
+}
+function shiftMonth(delta){
+  let {y,m} = state.calMonth;
+  m += delta;
+  if(m<0){ m=11; y--; }
+  if(m>11){ m=0; y++; }
+  state.calMonth = {y,m};
+  render();
 }
 function selectClientDate(d){
   state.client.date = d;
@@ -414,20 +449,19 @@ function renderClientConfirm(){
   const c = state.client;
   const service = db.services.find(s=>s.id===c.serviceId);
   const barber = db.barbers.find(b=>b.id===c.barberId);
-  const icsUrl = makeICS(barber, service, c);
   return `
-    <div class="topbar"><div class="brand">${logoMark(32)}Barbearia Flórida</div></div>
+    <div class="topbar"><div class="brand">${logoMark(30)}Barbearia Flórida</div></div>
     <div class="content center">
       <div class="big-check">✅</div>
-      <h1 class="page">Agendado!</h1>
+      <div class="screen-title">Agendado com ${esc(barber.name)}</div>
+      <h1 class="page" style="font-size:30px;margin-bottom:2px">${prettyDate(c.date)}</h1>
+      <div style="font-family:'Oswald',sans-serif;font-weight:700;font-size:40px;color:var(--gold);letter-spacing:0.02em;margin-bottom:18px">${minToLabel(c.slot)}</div>
       <div class="card" style="text-align:left">
-        <div class="name">${esc(service.name)} com ${esc(barber.name)}</div>
-        <div class="sub">${prettyDate(c.date)} às ${minToLabel(c.slot)}</div>
+        <div class="name">${esc(service.name)}</div>
         <div class="sub">Valor: R$ ${service.price.toFixed(2)}</div>
       </div>
-      ${barber.whatsapp ? `<button class="btn btn-steel" onclick="openWhats('${barber.whatsapp}','Olá ${esc(barber.name)}! Confirmando meu agendamento de ${esc(service.name)} em ${prettyDate(c.date)} às ${minToLabel(c.slot)}.')">Reenviar confirmação por WhatsApp</button>` : ''}
       <a class="btn btn-outline" style="margin-top:10px;text-decoration:none;box-sizing:border-box;display:block" target="_blank" href="${makeGCalUrl(c.date, c.slot, service.duration, service.name+' - '+barber.name, 'Agendamento na barbearia. Valor R$ '+service.price.toFixed(2))}">Adicionar ao Google Agenda (opcional)</a>
-      <a class="btn btn-outline" style="margin-top:10px;text-decoration:none;box-sizing:border-box" href="${icsUrl}" download="agendamento.ics">Adicionar lembrete ao calendário (.ics)</a>
+      ${barber.whatsapp ? `<button class="btn btn-steel" style="margin-top:10px" onclick="openWhats('${barber.whatsapp}','Olá ${esc(barber.name)}! Confirmando meu agendamento de ${esc(service.name)} em ${prettyDate(c.date)} às ${minToLabel(c.slot)}.')">Falar com meu Barbeiro</button>` : ''}
       <button class="btn btn-gold" style="margin-top:10px" onclick="go('home')">Concluir</button>
     </div>`;
 }
@@ -613,7 +647,7 @@ function renderAgendaTab(barber){
       </div>
       ${a.status!=='cancelado' ? `
       <div class="flexbtns">
-        <button class="btn btn-sm btn-steel" onclick="openWhats('${a.clientPhone}','Olá ${esc(a.clientName)}! Lembrete: seu horário de ${esc(a.serviceName)} é hoje/amanhã às ${minToLabel(a.start)}. Até já!')">Lembrete WhatsApp</button>
+        <button class="btn btn-sm btn-steel" onclick="openWhats('${a.clientPhone}','Olá ${esc(a.clientName)}! Lembrete: seu horário de ${esc(a.serviceName)} é dia ${prettyDate(a.date)} às ${minToLabel(a.start)}. Até lá!')">Lembrete WhatsApp
         <a class="btn btn-sm btn-outline" style="text-decoration:none" target="_blank" href="${makeGCalUrl(a.date, a.start, a.end-a.start, a.serviceName+' - '+a.clientName, 'Cliente: '+a.clientName+' · Valor R$ '+a.servicePrice.toFixed(2))}">📅 Agenda</a>
         <button class="btn btn-sm btn-red" onclick="cancelAppt('${a.id}')">Cancelar</button>
       </div>` : ''}
