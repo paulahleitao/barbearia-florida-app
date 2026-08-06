@@ -910,7 +910,7 @@ function renderConfigTab(barber){
     return `
     <div class="schedgroup">
       <div class="row" style="margin-bottom:8px">
-        <div class="grow name">Grupo de horário ${gi+1}</div>
+        <div class="grow name">Dias e horário ${gi+1}</div>
         ${groups.length>1 ? `<button class="btn btn-sm btn-red" onclick="removeScheduleGroup('${g.id}')">Remover</button>` : ''}
       </div>
       <div class="dayrow">${chips}</div>
@@ -931,7 +931,7 @@ function renderConfigTab(barber){
     <label class="field-label" style="margin-top:8px">Dias e horários de atendimento</label>
     <div class="sub" style="margin-bottom:10px">Crie grupos diferentes para dias com horários distintos — ex: Ter a Qui um horário, Sex e Sáb outro. Cada dia só pode estar em um grupo.</div>
     ${groupsHtml}
-    <button class="btn btn-outline" style="margin-bottom:16px" onclick="addScheduleGroup()">+ Adicionar grupo de horário</button>
+    <button class="btn btn-outline" style="margin-bottom:16px" onclick="addScheduleGroup()">+ Adicionar dias e horário</button>
     <div class="banner">As notificações de WhatsApp são links que abrem já com a mensagem pronta — grátis, mas exigem um toque em "enviar" no seu celular.</div>`;
 }
 async function updateBarber(field, val){
@@ -941,9 +941,14 @@ async function updateBarber(field, val){
 }
 async function toggleGroupDay(groupId, dayIdx){
   const barber = db.barbers.find(b=>b.id===state.barberSession);
-  barber.scheduleGroups.forEach(g=>{ g.days = g.days.filter(d=>d!==dayIdx); });
   const target = barber.scheduleGroups.find(g=>g.id===groupId);
-  target.days.push(dayIdx);
+  const alreadyInTarget = target.days.includes(dayIdx);
+  // um dia só pode estar em um grupo por vez, então tira ele de todos primeiro
+  barber.scheduleGroups.forEach(g=>{ g.days = g.days.filter(d=>d!==dayIdx); });
+  // se já estava marcado neste grupo, o clique foi pra desmarcar — não recoloca
+  if(!alreadyInTarget){
+    target.days.push(dayIdx);
+  }
   barber.workDays = barber.scheduleGroups.flatMap(g=>g.days);
   await saveDB();
   render();
@@ -966,7 +971,7 @@ async function addScheduleGroup(){
 async function removeScheduleGroup(groupId){
   const barber = db.barbers.find(b=>b.id===state.barberSession);
   if(barber.scheduleGroups.length<=1) return;
-  if(!confirm('Remover este grupo de horário?')) return;
+  if(!confirm('Remover estes dias e horário?')) return;
   barber.scheduleGroups = barber.scheduleGroups.filter(g=>g.id!==groupId);
   barber.workDays = barber.scheduleGroups.flatMap(g=>g.days);
   await saveDB();
