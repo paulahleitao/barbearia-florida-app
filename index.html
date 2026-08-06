@@ -23,7 +23,8 @@
   body{margin:0;background:var(--bg);color:var(--ink);font-family:'Inter',sans-serif;-webkit-font-smoothing:antialiased;}
   h1,h2,h3,.display{font-family:'Oswald',sans-serif;text-transform:uppercase;letter-spacing:0.03em;}
   #app{max-width:480px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;position:relative;}
-  .stripe{height:5px;background:repeating-linear-gradient(115deg,var(--pole-red) 0 12px,var(--pole-white) 12px 18px,var(--pole-blue) 18px 30px,var(--pole-white) 30px 36px);}
+  #root{flex:1;display:flex;flex-direction:column;}
+  .stripe{height:9px;background:repeating-linear-gradient(115deg,var(--pole-red) 0 12px,var(--pole-white) 12px 18px,var(--pole-blue) 18px 30px,var(--pole-white) 30px 36px);}
   .topbar{padding:18px 20px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);}
   .brand{font-size:20px;font-weight:700;display:flex;align-items:center;gap:8px;}
   .brand span{color:var(--gold);}
@@ -114,7 +115,7 @@
 </style>
 </head>
 <body>
-<div id="app"><div class="stripe"></div><div id="root"></div></div>
+<div id="app"><div class="stripe"></div><div id="root"></div><div class="stripe"></div></div>
 
 <script>
 /* ---------------- CONFIGURE AQUI (passo 3 do guia) ---------------- */
