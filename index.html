@@ -253,13 +253,13 @@ function getEffectiveHours(barberId, dateStr){
   if(!group) return null;
   return {start:group.start, end:group.end};
 }
-function getSlots(barberId, dateStr, duration, step){
+function getSlots(barberId, dateStr, duration, step, extraBusy){
   step = step || 15;
   const hours = getEffectiveHours(barberId, dateStr);
   if(!hours) return [];
   const dayAppts = db.appointments.filter(a=>a.barberId===barberId && a.date===dateStr && a.status!=='cancelado');
   const dayBlocks = db.blocks.filter(b=>b.barberId===barberId && b.date===dateStr);
-  const busy = dayAppts.concat(dayBlocks);
+  const busy = dayAppts.concat(dayBlocks).concat(extraBusy||[]);
   const slots=[];
   const isToday = dateStr===todayStr();
   const now = nowMinutes();
@@ -404,7 +404,19 @@ function changeServiceQty(sid, delta){
 }
 function continueFromServices(){
   if(!clientSelectedServices().length){ alert('Escolha ao menos um serviço.'); return; }
+  const c = state.client;
+  const items = [];
+  clientSelectedServices().forEach(s=>{
+    for(let i=0;i<s.qty;i++) items.push({id:uid(), serviceId:s.id, name:s.name, duration:s.duration, price:s.price, date:null, slot:null});
+  });
+  c.items = items;
+  c.itemIndex = 0;
+  state.calMonth = null;
   go('clientDate');
+}
+function extraBusyForItem(item, dateStr){
+  // outros serviços já agendados nesta mesma sacola, no mesmo dia, contam como ocupado
+  return state.client.items.filter(it=>it.id!==item.id && it.date===dateStr && it.slot!=null).map(it=>({start:it.slot, end:it.slot+it.duration}));
 }
 function clientSelectedServices(){
   const qtyMap = state.client.serviceQty || {};
@@ -423,7 +435,8 @@ function clientServiceNames(){
 function capFirst(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
 function renderClientDate(){
   const c = state.client;
-  const totalDuration = clientTotalDuration();
+  const item = c.items[c.itemIndex];
+  const multi = c.items.length>1;
   const today = new Date(todayStr()+'T00:00:00');
   const maxDate = new Date(today); maxDate.setDate(maxDate.getDate()+29);
 
@@ -442,18 +455,19 @@ function renderClientDate(){
     const d = `${y}-${pad(m+1)}-${pad(day)}`;
     const dObj = new Date(y,m,day);
     const inRange = dObj>=today && dObj<=maxDate;
-    const hasSlots = inRange && getSlots(c.barberId, d, totalDuration).length>0;
-    cells += `<div class="calday ${hasSlots?'':'muted'} ${c.date===d?'active':''}" ${hasSlots?`onclick="selectClientDate('${d}')"`:''}>${day}</div>`;
+    const hasSlots = inRange && getSlots(c.barberId, d, item.duration, 15, extraBusyForItem(item, d)).length>0;
+    cells += `<div class="calday ${hasSlots?'':'muted'} ${item.date===d?'active':''}" ${hasSlots?`onclick="selectClientDate('${d}')"`:''}>${day}</div>`;
   }
   const weekdayLabels = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
   const monthLabel = capFirst(firstOfMonth.toLocaleDateString('pt-BR',{month:'long', year:'numeric'}));
 
   return `
-    <div class="topbar"><button class="link-btn" onclick="go('clientService')">‹ Voltar</button></div>
+    <div class="topbar"><button class="link-btn" onclick="backFromDate()">‹ Voltar</button></div>
     <div class="content">
       ${steps(2,4)}
-      <div class="screen-title">Passo 3 de 4</div>
-      <h1 class="page">Escolha o dia</h1>
+      <div class="screen-title">Passo 3 de 4${multi?` · Serviço ${c.itemIndex+1} de ${c.items.length}`:''}</div>
+      <h1 class="page">Escolha o dia${multi?` — ${esc(item.name)}`:''}</h1>
+      ${multi?`<div class="sub" style="margin-bottom:12px">Pode ser no mesmo dia dos outros serviços ou em um dia diferente.</div>`:''}
       <div class="calnav">
         <button class="link-btn" ${curMonthIdx<=monthMin?'disabled style="opacity:0.25"':''} onclick="shiftMonth(-1)">‹</button>
         <div class="calmonth">${monthLabel}</div>
@@ -461,7 +475,7 @@ function renderClientDate(){
       </div>
       <div class="calgrid calgrid-head">${weekdayLabels.map(w=>`<div>${w}</div>`).join('')}</div>
       <div class="calgrid">${cells}</div>
-      ${c.date ? '<button class="btn btn-gold" style="margin-top:16px" onclick="go(\'clientSlot\')">Continuar</button>' : ''}
+      ${item.date ? '<button class="btn btn-gold" style="margin-top:16px" onclick="go(\'clientSlot\')">Continuar</button>' : ''}
     </div>`;
 }
 function shiftMonth(delta){
@@ -473,36 +487,59 @@ function shiftMonth(delta){
   render();
 }
 function selectClientDate(d){
-  state.client.date = d;
+  const item = state.client.items[state.client.itemIndex];
+  item.date = d;
+  item.slot = null;
   render();
+}
+function backFromDate(){
+  const c = state.client;
+  if(c.itemIndex>0){
+    c.itemIndex--;
+    go('clientSlot');
+  } else {
+    go('clientService');
+  }
 }
 
 function renderClientSlot(){
   const c = state.client;
-  const totalDuration = clientTotalDuration();
+  const item = c.items[c.itemIndex];
+  const multi = c.items.length>1;
   const barber = db.barbers.find(b=>b.id===c.barberId);
-  const slots = getSlots(c.barberId, c.date, totalDuration);
+  const slots = getSlots(c.barberId, item.date, item.duration, 15, extraBusyForItem(item, item.date));
   let grid = slots.length
-    ? '<div class="slotgrid">'+slots.map(m=>`<div class="slotbtn ${c.slot===m?'active':''}" onclick="selectClientSlot(${m})">${minToLabel(m)}</div>`).join('')+'</div>'
-    : '<div class="empty">Sem horários livres nesse dia para esse(s) serviço(s).<br>Tente outra data.</div>';
+    ? '<div class="slotgrid">'+slots.map(m=>`<div class="slotbtn ${item.slot===m?'active':''}" onclick="selectClientSlot(${m})">${minToLabel(m)}</div>`).join('')+'</div>'
+    : '<div class="empty">Sem horários livres nesse dia para esse serviço.<br>Tente outra data.</div>';
   return `
     <div class="topbar"><button class="link-btn" onclick="go('clientDate')">‹ Voltar</button></div>
     <div class="content">
       ${steps(2,4)}
-      <div class="screen-title"><b>${esc(barber.name)}</b> · ${esc(clientServiceNames())} · ${prettyDate(c.date)}</div>
+      <div class="screen-title"><b>${esc(barber.name)}</b> · ${esc(item.name)}${multi?` (${c.itemIndex+1} de ${c.items.length})`:''} · ${prettyDate(item.date)}</div>
       <h1 class="page">Escolha o horário</h1>
       ${grid}
-      ${c.slot!=null ? `<button class="btn btn-gold" style="margin-top:16px" onclick="go('clientDetails')">Continuar</button>` : ''}
+      ${item.slot!=null ? `<button class="btn btn-gold" style="margin-top:16px" onclick="advanceItem()">${c.itemIndex<c.items.length-1?'Próximo serviço':'Continuar'}</button>` : ''}
     </div>`;
 }
 function selectClientSlot(m){
-  state.client.slot = m;
+  state.client.items[state.client.itemIndex].slot = m;
   render();
+}
+function advanceItem(){
+  const c = state.client;
+  if(c.itemIndex < c.items.length-1){
+    c.itemIndex++;
+    state.calMonth = null;
+    go('clientDate');
+  } else {
+    go('clientDetails');
+  }
 }
 
 function renderClientDetails(){
   const c = state.client;
-  const selected = clientSelectedServices();
+  const items = c.items;
+  const totalPrice = items.reduce((a,it)=>a+it.price,0);
   return `
     <div class="topbar"><button class="link-btn" onclick="go('clientSlot')">‹ Voltar</button></div>
     <div class="content">
@@ -510,9 +547,9 @@ function renderClientDetails(){
       <div class="screen-title">Passo 4 de 4</div>
       <h1 class="page">Seus dados</h1>
       <div class="card">
-        ${selected.map(s=>`<div class="row" style="margin-bottom:4px"><div class="grow sub">${esc(s.name)}${s.qty>1?' x'+s.qty:''}</div><div class="sub">R$ ${(s.price*s.qty).toFixed(2)}</div></div>`).join('')}
+        ${items.map(it=>`<div class="row" style="margin-bottom:4px"><div class="grow sub">${esc(it.name)} · ${prettyDate(it.date)} às ${minToLabel(it.slot)}</div><div class="sub">R$ ${it.price.toFixed(2)}</div></div>`).join('')}
         <div class="row" style="margin-top:6px;border-top:1px solid var(--line);padding-top:8px">
-          <div class="grow name">Total</div><div class="name">R$ ${clientTotalPrice().toFixed(2)}</div>
+          <div class="grow name">Total</div><div class="name">R$ ${totalPrice.toFixed(2)}</div>
         </div>
       </div>
       <label class="field-label">Nome</label>
@@ -528,25 +565,36 @@ async function submitClientBooking(){
   const phone = document.getElementById('cliPhone').value.trim();
   if(!name || !phone){ alert('Preencha nome e WhatsApp.'); return; }
   const c = state.client;
-  const selected = clientSelectedServices();
-  const totalDuration = clientTotalDuration();
-  const totalPrice = clientTotalPrice();
-  const serviceNames = clientServiceNames();
   const barber = db.barbers.find(b=>b.id===c.barberId);
-  // re-check slot still free (race safety)
-  const stillFree = getSlots(c.barberId, c.date, totalDuration).includes(c.slot);
-  if(!stillFree){ alert('Esse horário acabou de ser ocupado. Escolha outro.'); go('clientSlot'); return; }
-  const appt = {
-    id: uid(), barberId:c.barberId, serviceId:selected[0].id, serviceName:serviceNames, servicePrice:totalPrice,
-    services: selected.map(s=>({id:s.id, name:s.name, price:s.price, duration:s.duration, qty:s.qty})),
-    clientName:name, clientPhone:phone, date:c.date, start:c.slot, end:c.slot+totalDuration,
-    status:'confirmado', source:'cliente', createdAt:Date.now()
-  };
-  db.appointments.push(appt);
+  // re-checa cada item (segurança contra conflito de última hora)
+  for(let i=0;i<c.items.length;i++){
+    const item = c.items[i];
+    const stillFree = getSlots(c.barberId, item.date, item.duration, 15, extraBusyForItem(item, item.date)).includes(item.slot);
+    if(!stillFree){
+      alert(`O horário de "${item.name}" (${prettyDate(item.date)} às ${minToLabel(item.slot)}) acabou de ser ocupado. Escolha outro horário para esse serviço.`);
+      c.itemIndex = i;
+      go('clientDate');
+      return;
+    }
+  }
+  const groupId = uid();
+  const apptIds = [];
+  c.items.forEach(item=>{
+    const appt = {
+      id: uid(), groupId, barberId:c.barberId, serviceId:item.serviceId, serviceName:item.name, servicePrice:item.price,
+      services: [{id:item.serviceId, name:item.name, price:item.price, duration:item.duration, qty:1}],
+      clientName:name, clientPhone:phone, date:item.date, start:item.slot, end:item.slot+item.duration,
+      status:'confirmado', source:'cliente', createdAt:Date.now()
+    };
+    db.appointments.push(appt);
+    apptIds.push(appt.id);
+  });
   await saveDB();
-  c.name=name; c.phone=phone; c.apptId=appt.id;
+  c.name=name; c.phone=phone; c.apptIds=apptIds;
   if(barber.whatsapp){
-    const msg = `Olá ${barber.name}! Meu nome é ${name}. Agendei ${serviceNames} para ${prettyDate(c.date)} às ${minToLabel(c.slot)}. Valor: R$ ${totalPrice.toFixed(2)}.`;
+    const lines = c.items.map(item=>`• ${item.name}: ${prettyDate(item.date)} às ${minToLabel(item.slot)}`).join('\n');
+    const totalPrice = c.items.reduce((a,it)=>a+it.price,0);
+    const msg = `Olá ${barber.name}! Meu nome é ${name}. Agendei:\n${lines}\nValor total: R$ ${totalPrice.toFixed(2)}.`;
     openWhats(barber.whatsapp, msg);
   }
   go('clientConfirm');
@@ -554,25 +602,34 @@ async function submitClientBooking(){
 
 function renderClientConfirm(){
   const c = state.client;
-  const appt = db.appointments.find(a=>a.id===c.apptId);
-  const selected = (appt && appt.services) ? appt.services : clientSelectedServices();
-  const totalDuration = selected.reduce((a,s)=>a+s.duration*(s.qty||1),0);
-  const totalPrice = selected.reduce((a,s)=>a+s.price*(s.qty||1),0);
-  const serviceNames = selected.map(s=>s.qty>1?`${s.name} x${s.qty}`:s.name).join(' + ');
+  const appts = (c.apptIds||[]).map(id=>db.appointments.find(a=>a.id===id)).filter(Boolean);
+  const items = appts.length
+    ? appts.map(a=>({name:a.serviceName, price:a.servicePrice, date:a.date, slot:a.start, duration:a.end-a.start}))
+    : c.items;
+  const totalPrice = items.reduce((a,it)=>a+it.price,0);
   const barber = db.barbers.find(b=>b.id===c.barberId);
+  const multi = items.length>1;
+  const first = items[0];
   return `
     <div class="topbar"><div class="brand">${logoMark(30)}Barbearia Flórida</div></div>
     <div class="content center">
       <div class="big-check">✅</div>
       <div class="screen-title">Agendado com ${esc(barber.name)}</div>
-      <h1 class="page" style="font-size:30px;margin-bottom:2px">${prettyDate(c.date)}</h1>
-      <div style="font-family:'Oswald',sans-serif;font-weight:700;font-size:40px;color:var(--gold);letter-spacing:0.02em;margin-bottom:18px">${minToLabel(c.slot)}</div>
-      <div class="card" style="text-align:left">
-        ${selected.map(s=>`<div class="row" style="margin-bottom:4px"><div class="grow sub">${esc(s.name)}${s.qty>1?' x'+s.qty:''}</div><div class="sub">R$ ${(s.price*(s.qty||1)).toFixed(2)}</div></div>`).join('')}
-        <div class="row" style="margin-top:6px;border-top:1px solid var(--line);padding-top:8px"><div class="grow name">Total</div><div class="name">R$ ${totalPrice.toFixed(2)}</div></div>
-      </div>
-      <a class="btn btn-outline" style="margin-top:10px;text-decoration:none;box-sizing:border-box;display:block" target="_blank" href="${makeGCalUrl(c.date, c.slot, totalDuration, serviceNames+' - '+barber.name, 'Agendamento na barbearia. Valor R$ '+totalPrice.toFixed(2))}">Adicionar ao Google Agenda (opcional)</a>
-      ${barber.whatsapp ? `<button class="btn btn-steel" style="margin-top:10px" onclick="openWhats('${barber.whatsapp}','Olá ${esc(barber.name)}! Confirmando meu agendamento de ${esc(serviceNames)} em ${prettyDate(c.date)} às ${minToLabel(c.slot)}.')">Falar com meu Barbeiro</button>` : ''}
+      ${multi ? `
+        <div class="card" style="text-align:left;margin-top:10px">
+          ${items.map(it=>`<div class="row" style="margin-bottom:8px"><div class="grow"><div class="sub" style="font-weight:600">${esc(it.name)}</div><div class="sub">${prettyDate(it.date)} às ${minToLabel(it.slot)}</div></div><div class="sub">R$ ${it.price.toFixed(2)}</div></div>`).join('')}
+          <div class="row" style="margin-top:6px;border-top:1px solid var(--line);padding-top:8px"><div class="grow name">Total</div><div class="name">R$ ${totalPrice.toFixed(2)}</div></div>
+        </div>
+      ` : `
+        <h1 class="page" style="font-size:30px;margin-bottom:2px">${prettyDate(first.date)}</h1>
+        <div style="font-family:'Oswald',sans-serif;font-weight:700;font-size:40px;color:var(--gold);letter-spacing:0.02em;margin-bottom:18px">${minToLabel(first.slot)}</div>
+        <div class="card" style="text-align:left">
+          <div class="row"><div class="grow sub">${esc(first.name)}</div><div class="sub">R$ ${first.price.toFixed(2)}</div></div>
+          <div class="row" style="margin-top:6px;border-top:1px solid var(--line);padding-top:8px"><div class="grow name">Total</div><div class="name">R$ ${totalPrice.toFixed(2)}</div></div>
+        </div>
+      `}
+      ${items.map(it=>`<a class="btn btn-outline" style="margin-top:10px;text-decoration:none;box-sizing:border-box;display:block" target="_blank" href="${makeGCalUrl(it.date, it.slot, it.duration, it.name+' - '+barber.name, 'Agendamento na barbearia. Valor R$ '+it.price.toFixed(2))}">Adicionar${multi?' '+esc(it.name):''} ao Google Agenda${multi?'':' (opcional)'}</a>`).join('')}
+      ${barber.whatsapp ? `<button class="btn btn-steel" style="margin-top:10px" onclick="openWhats('${barber.whatsapp}','Olá ${esc(barber.name)}! Confirmando meu agendamento.')">Falar com meu Barbeiro</button>` : ''}
       <button class="btn btn-gold" style="margin-top:10px" onclick="go('home')">Concluir</button>
     </div>`;
 }
