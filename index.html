@@ -16,13 +16,14 @@
 <style>
   :root{
     --bg:#1B1815; --bg-alt:#242019; --card:#2A241D; --ink:#F1E9DC; --ink-dim:#C9BFAE;
-    --gold:#C9962C; --gold-ink:#1B1815; --red:#8C2F2F; --steel:#3A5866; --line:rgba(241,233,220,0.12);
+    --gold:#2E6DA4; --gold-ink:#F1E9DC; --red:#8C2F2F; --steel:#3A5866; --line:rgba(241,233,220,0.12);
+    --pole-red:#C6403D; --pole-blue:#2E5C8F; --pole-white:#F1E9DC;
   }
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--ink);font-family:'Inter',sans-serif;-webkit-font-smoothing:antialiased;}
   h1,h2,h3,.display{font-family:'Oswald',sans-serif;text-transform:uppercase;letter-spacing:0.03em;}
   #app{max-width:480px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;position:relative;}
-  .stripe{height:5px;background:repeating-linear-gradient(115deg,var(--red) 0 14px,var(--gold) 14px 28px,var(--ink) 28px 30px);}
+  .stripe{height:5px;background:repeating-linear-gradient(115deg,var(--pole-red) 0 12px,var(--pole-white) 12px 18px,var(--pole-blue) 18px 30px,var(--pole-white) 30px 36px);}
   .topbar{padding:18px 20px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);}
   .brand{font-size:20px;font-weight:700;display:flex;align-items:center;gap:8px;}
   .brand span{color:var(--gold);}
@@ -88,6 +89,28 @@
   .dayrow{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;}
   .daychip{padding:8px 10px;border-radius:6px;border:1px solid var(--line);font-size:12px;cursor:pointer;background:var(--bg-alt);}
   .daychip.on{background:var(--steel);color:#fff;border-color:var(--steel);}
+  .calday{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:8px;background:var(--bg-alt);font-weight:600;font-size:13px;cursor:pointer;border:1px solid transparent;gap:2px;padding:2px;}
+  .calday.muted{opacity:0.35;}
+  .calday.active{background:var(--gold);color:var(--gold-ink);border-color:var(--gold);}
+  .calbadges{display:flex;gap:2px;flex-wrap:wrap;justify-content:center;min-height:12px;}
+  .calbadge{font-size:9px;font-weight:700;padding:1px 4px;border-radius:8px;line-height:1.4;color:#fff;}
+  .calbadge.green{background:#3C8C4A;}
+  .calbadge.orange{background:#C9762C;}
+  .schedgroup{background:var(--bg-alt);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:12px;}
+  .checkrow{display:flex;align-items:center;gap:10px;padding:2px 0;}
+  .checkrow input[type=checkbox]{width:auto;margin:0;flex-shrink:0;}
+  .svc-select{border:1px solid var(--line);}
+  .svc-select.checked{border-color:var(--gold);}
+  .totalbar{position:fixed;left:0;right:0;bottom:0;max-width:480px;margin:0 auto;background:var(--card);border-top:2px solid var(--pole-blue);box-shadow:0 -8px 20px rgba(0,0,0,0.5);padding:10px 18px 14px;z-index:60;}
+  .totalbar .names{font-size:11px;color:var(--ink-dim);margin-bottom:4px;}
+  .totalbar .sumrow{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;}
+  .totalbar .sumrow b{font-family:'Oswald';font-size:18px;color:var(--pole-red);}
+  .totalbar .btn{padding:11px;font-size:14px;background:var(--pole-blue);color:#fff;}
+  .qtystepper{display:flex;align-items:center;gap:10px;flex-shrink:0;}
+  .qtybtn{width:32px;height:32px;border-radius:50%;border:1px solid var(--line);background:var(--bg-alt);color:var(--ink);font-size:18px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;padding:0;}
+  .qtybtn:active{border-color:var(--gold);color:var(--gold);}
+  .qtybtn[disabled]{opacity:0.3;pointer-events:none;}
+  .qtyval{min-width:16px;text-align:center;font-weight:700;font-size:15px;font-family:'Oswald';}
 </style>
 </head>
 <body>
@@ -97,6 +120,9 @@
 /* ---------------- CONFIGURE AQUI (passo 3 do guia) ---------------- */
 const SUPABASE_URL = 'https://vupcacwipnmchujwjoti.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_5wKE7lS17_OF6Jr2RVdK1Q_uCzSFwC_';
+/* Senha mestra usada para redefinir o PIN de um barbeiro (Área do Barbeiro > Esqueci minha senha).
+   Troque esse valor por algo só seu, e não compartilhe com os barbeiros. */
+const MASTER_PASSWORD = 'florida-admin';
 const sb = (SUPABASE_URL.startsWith('http'))
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   : null;
@@ -108,8 +134,10 @@ const DB_KEY = 'db';
 function defaultDB(){
   return {
     barbers:[
-      {id:'b1', name:'Junior', whatsapp:'', pin:'1234', workStart:540, workEnd:1140, workDays:[2,3,4,5,6]},
-      {id:'b2', name:'Yuri', whatsapp:'', pin:'1234', workStart:540, workEnd:1140, workDays:[2,3,4,5,6]}
+      {id:'b1', name:'Junior', whatsapp:'', pin:'1234', workStart:540, workEnd:1140, workDays:[2,3,4,5,6],
+        scheduleGroups:[{id:'g1', days:[2,3,4], start:540, end:1140},{id:'g2', days:[5,6], start:540, end:1140}]},
+      {id:'b2', name:'Yuri', whatsapp:'', pin:'1234', workStart:540, workEnd:1140, workDays:[2,3,4,5,6],
+        scheduleGroups:[{id:'g1', days:[2,3,4], start:540, end:1140},{id:'g2', days:[5,6], start:540, end:1140}]}
     ],
     services:[
       {id:'s1', name:'Corte simples', duration:30, price:35},
@@ -147,6 +175,10 @@ async function loadDB(){
   if(db.barbers[1] && db.barbers[1].name==='Barbeiro 2'){ db.barbers[1].name='Yuri'; migrated=true; }
   db.barbers.forEach(b=>{
     if(JSON.stringify(b.workDays)===JSON.stringify([1,2,3,4,5,6])){ b.workDays=[2,3,4,5,6]; migrated=true; }
+    if(!b.scheduleGroups || !b.scheduleGroups.length){
+      b.scheduleGroups = [{id:uid(), days:(b.workDays||[]).slice(), start:b.workStart||540, end:b.workEnd||1140}];
+      migrated=true;
+    }
   });
   if(migrated) saveDB();
 }
@@ -189,6 +221,22 @@ const LOGO_DATA_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAOEAAADhCAI
 function logoMark(size){
   return `<img src="${LOGO_DATA_URI}" alt="Barbearia Flórida" style="width:${size}px;height:${size}px;object-fit:contain;border-radius:50%;flex-shrink:0">`;
 }
+function barberPoleIcon(size){
+  const h = size, w = Math.round(size*0.42);
+  return `<svg width="${w}" height="${h}" viewBox="0 0 40 100" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0">
+    <defs>
+      <pattern id="poleStripes" patternUnits="userSpaceOnUse" width="18" height="18" patternTransform="rotate(35)">
+        <rect width="18" height="18" fill="var(--pole-white)"/>
+        <rect width="6" height="18" fill="var(--pole-red)"/>
+        <rect x="12" width="6" height="18" fill="var(--pole-blue)"/>
+      </pattern>
+    </defs>
+    <rect x="5" y="2" width="30" height="9" rx="4" fill="var(--gold)"/>
+    <circle cx="20" cy="6" r="5" fill="var(--gold)"/>
+    <rect x="4" y="9" width="32" height="82" rx="16" fill="url(#poleStripes)" stroke="var(--bg)" stroke-width="2"/>
+    <rect x="5" y="89" width="30" height="9" rx="4" fill="var(--steel)"/>
+  </svg>`;
+}
 
 function dayOverrideKey(barberId, dateStr){ return barberId+'|'+dateStr; }
 function getEffectiveHours(barberId, dateStr){
@@ -198,8 +246,11 @@ function getEffectiveHours(barberId, dateStr){
     if(override.mode==='closed') return null;
     if(override.mode==='open') return {start:override.workStart, end:override.workEnd};
   }
-  if(!barber.workDays.includes(dow(dateStr))) return null;
-  return {start:barber.workStart, end:barber.workEnd};
+  const d = dow(dateStr);
+  const groups = (barber.scheduleGroups && barber.scheduleGroups.length) ? barber.scheduleGroups : [{days:barber.workDays, start:barber.workStart, end:barber.workEnd}];
+  const group = groups.find(g=>g.days.includes(d));
+  if(!group) return null;
+  return {start:group.start, end:group.end};
 }
 function getSlots(barberId, dateStr, duration, step){
   step = step || 15;
@@ -254,7 +305,7 @@ function renderHome(){
       <button class="link-btn" onclick="go('barberLogin')">Área do Barbeiro</button>
     </div>
     <div class="content">
-      <div class="center" style="margin:6px 0 20px">${logoMark(64)}</div>
+      <div class="center" style="margin:6px 0 20px;display:flex;align-items:center;justify-content:center;gap:14px">${barberPoleIcon(70)}${logoMark(64)}</div>
       <h1 class="page center">Bem-vindo</h1>
       <div class="card select" onclick="go('clientBarber')">
         <div class="row">
@@ -300,34 +351,78 @@ function renderClientBarber(){
 
 function renderClientService(){
   const c = state.client;
-  let cards = db.services.map(s=>`
-    <div class="card select" onclick="selectClientService('${s.id}')">
+  if(!c.serviceQty) c.serviceQty = {};
+  let cards = db.services.map(s=>{
+    const qty = c.serviceQty[s.id]||0;
+    return `
+    <div class="card svc-select ${qty>0?'checked':''}">
       <div class="row">
         <div class="grow">
           <div class="name">${esc(s.name)}</div>
-          <div class="sub">${s.duration} min</div>
+          <div class="sub">${s.duration} min · R$ ${s.price.toFixed(2)} cada</div>
         </div>
-        <div class="price-tag">R$ ${s.price.toFixed(2)}</div>
+        <div class="qtystepper">
+          <button type="button" class="qtybtn" ${qty===0?'disabled':''} onclick="changeServiceQty('${s.id}',-1)">−</button>
+          <span class="qtyval">${qty}</span>
+          <button type="button" class="qtybtn" onclick="changeServiceQty('${s.id}',1)">+</button>
+        </div>
       </div>
-    </div>`).join('');
+      ${qty>0?`<div class="sub" style="margin-top:8px;text-align:right">Subtotal: R$ ${(s.price*qty).toFixed(2)}</div>`:''}
+    </div>`;
+  }).join('');
+  const selected = clientSelectedServices();
+  const totalDuration = clientTotalDuration();
+  const totalPrice = clientTotalPrice();
   return `
     <div class="topbar"><button class="link-btn" onclick="go('clientBarber')">‹ Voltar</button></div>
-    <div class="content">
+    <div class="content" style="${selected.length?'padding-bottom:160px':''}">
       ${steps(1,4)}
       <div class="screen-title">Passo 2 de 4</div>
-      <h1 class="page">Escolha o serviço</h1>
+      <h1 class="page">Escolha o(s) serviço(s)</h1>
+      <div class="sub" style="margin-bottom:12px">Toque em + para adicionar. Dá pra repetir um serviço (ex: 2 cortes, pai e filho).</div>
       ${cards}
-    </div>`;
+    </div>
+    ${selected.length ? `
+    <div class="totalbar">
+      <div class="names">${esc(clientServiceNames())}</div>
+      <div class="sumrow">
+        <div class="sub">${totalDuration} min</div>
+        <b>R$ ${totalPrice.toFixed(2)}</b>
+      </div>
+      <button class="btn btn-gold" onclick="continueFromServices()">Continuar</button>
+    </div>` : ''}`;
 }
-function selectClientService(sid){
-  state.client.serviceId = sid;
+function changeServiceQty(sid, delta){
+  const c = state.client;
+  if(!c.serviceQty) c.serviceQty = {};
+  const cur = c.serviceQty[sid]||0;
+  const next = Math.max(0, Math.min(9, cur+delta));
+  if(next===0) delete c.serviceQty[sid];
+  else c.serviceQty[sid] = next;
+  render();
+}
+function continueFromServices(){
+  if(!clientSelectedServices().length){ alert('Escolha ao menos um serviço.'); return; }
   go('clientDate');
+}
+function clientSelectedServices(){
+  const qtyMap = state.client.serviceQty || {};
+  return db.services.filter(s=>(qtyMap[s.id]||0)>0).map(s=>Object.assign({}, s, {qty:qtyMap[s.id]}));
+}
+function clientTotalDuration(){
+  return clientSelectedServices().reduce((a,s)=>a+s.duration*s.qty,0);
+}
+function clientTotalPrice(){
+  return clientSelectedServices().reduce((a,s)=>a+s.price*s.qty,0);
+}
+function clientServiceNames(){
+  return clientSelectedServices().map(s=>s.qty>1?`${s.name} x${s.qty}`:s.name).join(' + ');
 }
 
 function capFirst(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
 function renderClientDate(){
   const c = state.client;
-  const service = db.services.find(s=>s.id===c.serviceId);
+  const totalDuration = clientTotalDuration();
   const today = new Date(todayStr()+'T00:00:00');
   const maxDate = new Date(today); maxDate.setDate(maxDate.getDate()+29);
 
@@ -346,7 +441,7 @@ function renderClientDate(){
     const d = `${y}-${pad(m+1)}-${pad(day)}`;
     const dObj = new Date(y,m,day);
     const inRange = dObj>=today && dObj<=maxDate;
-    const hasSlots = inRange && getSlots(c.barberId, d, service.duration).length>0;
+    const hasSlots = inRange && getSlots(c.barberId, d, totalDuration).length>0;
     cells += `<div class="calday ${hasSlots?'':'muted'} ${c.date===d?'active':''}" ${hasSlots?`onclick="selectClientDate('${d}')"`:''}>${day}</div>`;
   }
   const weekdayLabels = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
@@ -383,17 +478,17 @@ function selectClientDate(d){
 
 function renderClientSlot(){
   const c = state.client;
-  const service = db.services.find(s=>s.id===c.serviceId);
+  const totalDuration = clientTotalDuration();
   const barber = db.barbers.find(b=>b.id===c.barberId);
-  const slots = getSlots(c.barberId, c.date, service.duration);
+  const slots = getSlots(c.barberId, c.date, totalDuration);
   let grid = slots.length
     ? '<div class="slotgrid">'+slots.map(m=>`<div class="slotbtn ${c.slot===m?'active':''}" onclick="selectClientSlot(${m})">${minToLabel(m)}</div>`).join('')+'</div>'
-    : '<div class="empty">Sem horários livres nesse dia para esse serviço.<br>Tente outra data.</div>';
+    : '<div class="empty">Sem horários livres nesse dia para esse(s) serviço(s).<br>Tente outra data.</div>';
   return `
     <div class="topbar"><button class="link-btn" onclick="go('clientDate')">‹ Voltar</button></div>
     <div class="content">
       ${steps(2,4)}
-      <div class="screen-title"><b>${esc(barber.name)}</b> · ${esc(service.name)} · ${prettyDate(c.date)}</div>
+      <div class="screen-title"><b>${esc(barber.name)}</b> · ${esc(clientServiceNames())} · ${prettyDate(c.date)}</div>
       <h1 class="page">Escolha o horário</h1>
       ${grid}
       ${c.slot!=null ? `<button class="btn btn-gold" style="margin-top:16px" onclick="go('clientDetails')">Continuar</button>` : ''}
@@ -406,12 +501,19 @@ function selectClientSlot(m){
 
 function renderClientDetails(){
   const c = state.client;
+  const selected = clientSelectedServices();
   return `
     <div class="topbar"><button class="link-btn" onclick="go('clientSlot')">‹ Voltar</button></div>
     <div class="content">
       ${steps(3,4)}
       <div class="screen-title">Passo 4 de 4</div>
       <h1 class="page">Seus dados</h1>
+      <div class="card">
+        ${selected.map(s=>`<div class="row" style="margin-bottom:4px"><div class="grow sub">${esc(s.name)}${s.qty>1?' x'+s.qty:''}</div><div class="sub">R$ ${(s.price*s.qty).toFixed(2)}</div></div>`).join('')}
+        <div class="row" style="margin-top:6px;border-top:1px solid var(--line);padding-top:8px">
+          <div class="grow name">Total</div><div class="name">R$ ${clientTotalPrice().toFixed(2)}</div>
+        </div>
+      </div>
       <label class="field-label">Nome</label>
       <input id="cliName" placeholder="Seu nome" value="${esc(c.name||'')}">
       <label class="field-label">WhatsApp (com DDD)</label>
@@ -425,21 +527,25 @@ async function submitClientBooking(){
   const phone = document.getElementById('cliPhone').value.trim();
   if(!name || !phone){ alert('Preencha nome e WhatsApp.'); return; }
   const c = state.client;
-  const service = db.services.find(s=>s.id===c.serviceId);
+  const selected = clientSelectedServices();
+  const totalDuration = clientTotalDuration();
+  const totalPrice = clientTotalPrice();
+  const serviceNames = clientServiceNames();
   const barber = db.barbers.find(b=>b.id===c.barberId);
   // re-check slot still free (race safety)
-  const stillFree = getSlots(c.barberId, c.date, service.duration).includes(c.slot);
+  const stillFree = getSlots(c.barberId, c.date, totalDuration).includes(c.slot);
   if(!stillFree){ alert('Esse horário acabou de ser ocupado. Escolha outro.'); go('clientSlot'); return; }
   const appt = {
-    id: uid(), barberId:c.barberId, serviceId:service.id, serviceName:service.name, servicePrice:service.price,
-    clientName:name, clientPhone:phone, date:c.date, start:c.slot, end:c.slot+service.duration,
+    id: uid(), barberId:c.barberId, serviceId:selected[0].id, serviceName:serviceNames, servicePrice:totalPrice,
+    services: selected.map(s=>({id:s.id, name:s.name, price:s.price, duration:s.duration, qty:s.qty})),
+    clientName:name, clientPhone:phone, date:c.date, start:c.slot, end:c.slot+totalDuration,
     status:'confirmado', source:'cliente', createdAt:Date.now()
   };
   db.appointments.push(appt);
   await saveDB();
   c.name=name; c.phone=phone; c.apptId=appt.id;
   if(barber.whatsapp){
-    const msg = `Olá ${barber.name}! Meu nome é ${name}. Agendei ${service.name} para ${prettyDate(c.date)} às ${minToLabel(c.slot)}. Valor: R$ ${service.price.toFixed(2)}.`;
+    const msg = `Olá ${barber.name}! Meu nome é ${name}. Agendei ${serviceNames} para ${prettyDate(c.date)} às ${minToLabel(c.slot)}. Valor: R$ ${totalPrice.toFixed(2)}.`;
     openWhats(barber.whatsapp, msg);
   }
   go('clientConfirm');
@@ -447,7 +553,11 @@ async function submitClientBooking(){
 
 function renderClientConfirm(){
   const c = state.client;
-  const service = db.services.find(s=>s.id===c.serviceId);
+  const appt = db.appointments.find(a=>a.id===c.apptId);
+  const selected = (appt && appt.services) ? appt.services : clientSelectedServices();
+  const totalDuration = selected.reduce((a,s)=>a+s.duration*(s.qty||1),0);
+  const totalPrice = selected.reduce((a,s)=>a+s.price*(s.qty||1),0);
+  const serviceNames = selected.map(s=>s.qty>1?`${s.name} x${s.qty}`:s.name).join(' + ');
   const barber = db.barbers.find(b=>b.id===c.barberId);
   return `
     <div class="topbar"><div class="brand">${logoMark(30)}Barbearia Flórida</div></div>
@@ -457,11 +567,11 @@ function renderClientConfirm(){
       <h1 class="page" style="font-size:30px;margin-bottom:2px">${prettyDate(c.date)}</h1>
       <div style="font-family:'Oswald',sans-serif;font-weight:700;font-size:40px;color:var(--gold);letter-spacing:0.02em;margin-bottom:18px">${minToLabel(c.slot)}</div>
       <div class="card" style="text-align:left">
-        <div class="name">${esc(service.name)}</div>
-        <div class="sub">Valor: R$ ${service.price.toFixed(2)}</div>
+        ${selected.map(s=>`<div class="row" style="margin-bottom:4px"><div class="grow sub">${esc(s.name)}${s.qty>1?' x'+s.qty:''}</div><div class="sub">R$ ${(s.price*(s.qty||1)).toFixed(2)}</div></div>`).join('')}
+        <div class="row" style="margin-top:6px;border-top:1px solid var(--line);padding-top:8px"><div class="grow name">Total</div><div class="name">R$ ${totalPrice.toFixed(2)}</div></div>
       </div>
-      <a class="btn btn-outline" style="margin-top:10px;text-decoration:none;box-sizing:border-box;display:block" target="_blank" href="${makeGCalUrl(c.date, c.slot, service.duration, service.name+' - '+barber.name, 'Agendamento na barbearia. Valor R$ '+service.price.toFixed(2))}">Adicionar ao Google Agenda (opcional)</a>
-      ${barber.whatsapp ? `<button class="btn btn-steel" style="margin-top:10px" onclick="openWhats('${barber.whatsapp}','Olá ${esc(barber.name)}! Confirmando meu agendamento de ${esc(service.name)} em ${prettyDate(c.date)} às ${minToLabel(c.slot)}.')">Falar com meu Barbeiro</button>` : ''}
+      <a class="btn btn-outline" style="margin-top:10px;text-decoration:none;box-sizing:border-box;display:block" target="_blank" href="${makeGCalUrl(c.date, c.slot, totalDuration, serviceNames+' - '+barber.name, 'Agendamento na barbearia. Valor R$ '+totalPrice.toFixed(2))}">Adicionar ao Google Agenda (opcional)</a>
+      ${barber.whatsapp ? `<button class="btn btn-steel" style="margin-top:10px" onclick="openWhats('${barber.whatsapp}','Olá ${esc(barber.name)}! Confirmando meu agendamento de ${esc(serviceNames)} em ${prettyDate(c.date)} às ${minToLabel(c.slot)}.')">Falar com meu Barbeiro</button>` : ''}
       <button class="btn btn-gold" style="margin-top:10px" onclick="go('home')">Concluir</button>
     </div>`;
 }
@@ -500,6 +610,7 @@ function renderBarberLogin(){
   return `
     <div class="topbar"><button class="link-btn" onclick="go('home')">‹ Início</button></div>
     <div class="content">
+      <div class="center" style="margin-bottom:6px">${barberPoleIcon(48)}</div>
       <h1 class="page">Login do barbeiro</h1>
       ${cards}
       <div id="pinBox"></div>
@@ -509,7 +620,9 @@ function pickBarberLogin(id){
   document.getElementById('pinBox').innerHTML = `
     <label class="field-label" style="margin-top:12px">PIN</label>
     <input id="pinInput" type="password" inputmode="numeric" placeholder="****">
-    <button class="btn btn-gold" onclick="tryLogin('${id}')">Entrar</button>`;
+    <button class="btn btn-gold" onclick="tryLogin('${id}')">Entrar</button>
+    <button class="link-btn" style="margin-top:8px" onclick="showForgotPin('${id}')">Esqueci minha senha</button>
+    <div id="forgotBox"></div>`;
 }
 function tryLogin(id){
   const barber = db.barbers.find(b=>b.id===id);
@@ -519,6 +632,26 @@ function tryLogin(id){
   }else{
     alert('PIN incorreto.');
   }
+}
+function showForgotPin(id){
+  document.getElementById('forgotBox').innerHTML = `
+    <div class="banner">Peça para o responsável pela barbearia digitar a senha mestra para liberar um novo PIN.</div>
+    <label class="field-label">Senha mestra (admin)</label>
+    <input id="masterInput" type="password" placeholder="Senha mestra">
+    <label class="field-label">Novo PIN</label>
+    <input id="newPinInput" type="password" inputmode="numeric" placeholder="Novo PIN">
+    <button class="btn btn-steel" onclick="resetBarberPin('${id}')">Redefinir PIN</button>`;
+}
+async function resetBarberPin(id){
+  const master = document.getElementById('masterInput').value;
+  const newPin = document.getElementById('newPinInput').value.trim();
+  if(master !== MASTER_PASSWORD){ alert('Senha mestra incorreta.'); return; }
+  if(!newPin){ alert('Informe o novo PIN.'); return; }
+  const barber = db.barbers.find(b=>b.id===id);
+  barber.pin = newPin;
+  await saveDB();
+  alert('PIN redefinido com sucesso! Já pode entrar com o novo PIN.');
+  document.getElementById('forgotBox').innerHTML = '';
 }
 
 /* ---------------- BARBER DASHBOARD ---------------- */
@@ -531,7 +664,7 @@ function renderBarberDashboard(){
   if(tab==='config') body = renderConfigTab(barber);
   return `
     <div class="topbar">
-      <div class="brand">${esc(barber.name)}</div>
+      <div class="brand">${barberPoleIcon(26)}${esc(barber.name)}</div>
       <button class="link-btn" onclick="go('home')">Sair</button>
     </div>
     <div class="content">${body}</div>
@@ -647,26 +780,86 @@ function renderAgendaTab(barber){
       </div>
       ${a.status!=='cancelado' ? `
       <div class="flexbtns">
-        <button class="btn btn-sm btn-steel" onclick="openWhats('${a.clientPhone}','Olá ${esc(a.clientName)}! Lembrete: seu horário de ${esc(a.serviceName)} é dia ${prettyDate(a.date)} às ${minToLabel(a.start)}. Até lá!')">Lembrete WhatsApp
+        <button class="btn btn-sm btn-steel" onclick="openWhats('${a.clientPhone}','Olá ${esc(a.clientName)}! Lembrete: seu horário de ${esc(a.serviceName)} é dia ${prettyDate(a.date)} às ${minToLabel(a.start)}. Até lá!')">Lembrete WhatsApp</button>
         <a class="btn btn-sm btn-outline" style="text-decoration:none" target="_blank" href="${makeGCalUrl(a.date, a.start, a.end-a.start, a.serviceName+' - '+a.clientName, 'Cliente: '+a.clientName+' · Valor R$ '+a.servicePrice.toFixed(2))}">📅 Agenda</a>
         <button class="btn btn-sm btn-red" onclick="cancelAppt('${a.id}')">Cancelar</button>
       </div>` : ''}
     </div>`).join('') : '<div class="empty">Nenhum agendamento neste dia.</div>';
 
-  let strip = '';
-  for(let i=-2;i<12;i++){
-    const d = addDaysStr(todayStr(), i);
-    const dd = new Date(d+'T00:00:00');
-    strip += `<div class="datebtn ${date===d?'active':''}" onclick="setBarberDate('${d}')">${dd.toLocaleDateString('pt-BR',{weekday:'short'})}<b>${pad(dd.getDate())}</b></div>`;
-  }
   return `
     <h1 class="page">Agenda</h1>
-    <div class="datestrip">${strip}</div>
+    ${renderBarberCalendar(barber, date)}
+    ${renderMonthSummary(barber, state.barberCalMonth.y, state.barberCalMonth.m)}
     ${renderDayAdjust(barber, date)}
     <button class="btn btn-gold" style="margin:12px 0 16px" onclick="go('barberNewAppt')">+ Novo agendamento manual</button>
+    <div class="name" style="margin-bottom:8px">${prettyDate(date)}</div>
     ${items}`;
 }
-function setBarberDate(d){ state.barberDate = d; render(); }
+function renderMonthSummary(barber, y, m){
+  const prefix = `${y}-${pad(m+1)}-`;
+  const monthAppts = db.appointments.filter(a=>a.barberId===barber.id && a.date.startsWith(prefix));
+  const confirmed = monthAppts.filter(a=>a.status!=='cancelado');
+  const canceled = monthAppts.filter(a=>a.status==='cancelado');
+  const revenue = confirmed.reduce((sum,a)=>sum+a.servicePrice,0);
+  const monthLabel = capFirst(new Date(y,m,1).toLocaleDateString('pt-BR',{month:'long', year:'numeric'}));
+  return `
+    <div class="card">
+      <div class="name" style="margin-bottom:10px">Resumo de ${monthLabel}</div>
+      <div class="row" style="margin-bottom:6px"><div class="grow sub">Agendamentos confirmados</div><div class="name">${confirmed.length}</div></div>
+      <div class="row" style="margin-bottom:6px"><div class="grow sub">Cancelados</div><div class="name">${canceled.length}</div></div>
+      <div class="row"><div class="grow sub">Faturamento (confirmados)</div><div class="name" style="color:var(--gold)">R$ ${revenue.toFixed(2)}</div></div>
+    </div>`;
+}
+function renderBarberCalendar(barber, selectedDate){
+  if(!state.barberCalMonth){
+    const sd = new Date(selectedDate+'T00:00:00');
+    state.barberCalMonth = {y: sd.getFullYear(), m: sd.getMonth()};
+  }
+  const {y,m} = state.barberCalMonth;
+  const firstOfMonth = new Date(y,m,1);
+  const startWeekday = firstOfMonth.getDay();
+  const daysInMonth = new Date(y,m+1,0).getDate();
+  const weekdayLabels = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  const monthLabel = capFirst(firstOfMonth.toLocaleDateString('pt-BR',{month:'long', year:'numeric'}));
+
+  let cells = '';
+  for(let i=0;i<startWeekday;i++) cells += '<div></div>';
+  for(let day=1; day<=daysInMonth; day++){
+    const d = `${y}-${pad(m+1)}-${pad(day)}`;
+    const dayAppts = db.appointments.filter(a=>a.barberId===barber.id && a.date===d);
+    const confirmedCount = dayAppts.filter(a=>a.status!=='cancelado').length;
+    const canceledCount = dayAppts.filter(a=>a.status==='cancelado').length;
+    cells += `<div class="calday ${selectedDate===d?'active':''}" onclick="setBarberDate('${d}')">
+      <div>${day}</div>
+      <div class="calbadges">
+        ${confirmedCount?`<span class="calbadge green">${confirmedCount}</span>`:''}
+        ${canceledCount?`<span class="calbadge orange">${canceledCount}</span>`:''}
+      </div>
+    </div>`;
+  }
+  return `
+    <div class="calnav">
+      <button class="link-btn" onclick="shiftBarberMonth(-1)">‹</button>
+      <div class="calmonth">${monthLabel}</div>
+      <button class="link-btn" onclick="shiftBarberMonth(1)">›</button>
+    </div>
+    <div class="calgrid calgrid-head">${weekdayLabels.map(w=>`<div>${w}</div>`).join('')}</div>
+    <div class="calgrid">${cells}</div>`;
+}
+function shiftBarberMonth(delta){
+  let {y,m} = state.barberCalMonth;
+  m += delta;
+  if(m<0){ m=11; y--; }
+  if(m>11){ m=0; y++; }
+  state.barberCalMonth = {y,m};
+  render();
+}
+function setBarberDate(d){
+  state.barberDate = d;
+  const sd = new Date(d+'T00:00:00');
+  state.barberCalMonth = {y:sd.getFullYear(), m:sd.getMonth()};
+  render();
+}
 async function cancelAppt(id){
   const a = db.appointments.find(x=>x.id===id);
   if(!confirm('Cancelar este agendamento?')) return;
@@ -710,7 +903,22 @@ async function deleteService(id){
 
 function renderConfigTab(barber){
   const dayLabels = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
-  let dayChips = dayLabels.map((l,i)=>`<div class="daychip ${barber.workDays.includes(i)?'on':''}" onclick="toggleWorkDay(${i})">${l}</div>`).join('');
+  const groups = barber.scheduleGroups || [];
+  let groupsHtml = groups.map((g,gi)=>{
+    let chips = dayLabels.map((l,i)=>`<div class="daychip ${g.days.includes(i)?'on':''}" onclick="toggleGroupDay('${g.id}',${i})">${l}</div>`).join('');
+    return `
+    <div class="schedgroup">
+      <div class="row" style="margin-bottom:8px">
+        <div class="grow name">Grupo de horário ${gi+1}</div>
+        ${groups.length>1 ? `<button class="btn btn-sm btn-red" onclick="removeScheduleGroup('${g.id}')">Remover</button>` : ''}
+      </div>
+      <div class="dayrow">${chips}</div>
+      <div class="grid2">
+        <div><label class="field-label">Início</label><input value="${minToLabel(g.start)}" onchange="updateGroupTime('${g.id}','start',this.value)"></div>
+        <div><label class="field-label">Fim</label><input value="${minToLabel(g.end)}" onchange="updateGroupTime('${g.id}','end',this.value)"></div>
+      </div>
+    </div>`;
+  }).join('');
   return `
     <h1 class="page">Configurações</h1>
     <label class="field-label">Nome</label>
@@ -719,12 +927,10 @@ function renderConfigTab(barber){
     <input value="${esc(barber.whatsapp)}" onchange="updateBarber('whatsapp',this.value)">
     <label class="field-label">Novo PIN de acesso</label>
     <input value="${esc(barber.pin)}" onchange="updateBarber('pin',this.value)">
-    <div class="grid2">
-      <div><label class="field-label">Início expediente</label><input value="${minToLabel(barber.workStart)}" onchange="updateBarberTime('workStart',this.value)"></div>
-      <div><label class="field-label">Fim expediente</label><input value="${minToLabel(barber.workEnd)}" onchange="updateBarberTime('workEnd',this.value)"></div>
-    </div>
-    <label class="field-label">Dias de atendimento</label>
-    <div class="dayrow">${dayChips}</div>
+    <label class="field-label" style="margin-top:8px">Dias e horários de atendimento</label>
+    <div class="sub" style="margin-bottom:10px">Crie grupos diferentes para dias com horários distintos — ex: Ter a Qui um horário, Sex e Sáb outro. Cada dia só pode estar em um grupo.</div>
+    ${groupsHtml}
+    <button class="btn btn-outline" style="margin-bottom:16px" onclick="addScheduleGroup()">+ Adicionar grupo de horário</button>
     <div class="banner">As notificações de WhatsApp são links que abrem já com a mensagem pronta — grátis, mas exigem um toque em "enviar" no seu celular.</div>`;
 }
 async function updateBarber(field, val){
@@ -732,18 +938,36 @@ async function updateBarber(field, val){
   barber[field] = val;
   await saveDB();
 }
-async function updateBarberTime(field, val){
+async function toggleGroupDay(groupId, dayIdx){
   const barber = db.barbers.find(b=>b.id===state.barberSession);
-  const [h,m] = val.split(':').map(Number);
-  if(isNaN(h)||isNaN(m)) return;
-  barber[field] = h*60+m;
+  barber.scheduleGroups.forEach(g=>{ g.days = g.days.filter(d=>d!==dayIdx); });
+  const target = barber.scheduleGroups.find(g=>g.id===groupId);
+  target.days.push(dayIdx);
+  barber.workDays = barber.scheduleGroups.flatMap(g=>g.days);
   await saveDB();
   render();
 }
-async function toggleWorkDay(i){
+async function updateGroupTime(groupId, field, val){
   const barber = db.barbers.find(b=>b.id===state.barberSession);
-  if(barber.workDays.includes(i)) barber.workDays = barber.workDays.filter(d=>d!==i);
-  else barber.workDays.push(i);
+  const [h,m] = val.split(':').map(Number);
+  if(isNaN(h)||isNaN(m)) return;
+  const target = barber.scheduleGroups.find(g=>g.id===groupId);
+  target[field] = h*60+m;
+  await saveDB();
+  render();
+}
+async function addScheduleGroup(){
+  const barber = db.barbers.find(b=>b.id===state.barberSession);
+  barber.scheduleGroups.push({id:uid(), days:[], start:540, end:1140});
+  await saveDB();
+  render();
+}
+async function removeScheduleGroup(groupId){
+  const barber = db.barbers.find(b=>b.id===state.barberSession);
+  if(barber.scheduleGroups.length<=1) return;
+  if(!confirm('Remover este grupo de horário?')) return;
+  barber.scheduleGroups = barber.scheduleGroups.filter(g=>g.id!==groupId);
+  barber.workDays = barber.scheduleGroups.flatMap(g=>g.days);
   await saveDB();
   render();
 }
