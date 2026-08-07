@@ -213,8 +213,8 @@ function toWaNumber(phone){
   return digits;
 }
 function openWhats(phone, text){
-  const url = 'https://wa.me/'+toWaNumber(phone)+'?text='+encodeURIComponent(text);
-  window.open(url, '_blank');
+  const url = 'whatsapp://send?phone='+toWaNumber(phone)+'&text='+encodeURIComponent(text);
+  window.location.href = url;
   return url;
 }
 function esc(s){ return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
