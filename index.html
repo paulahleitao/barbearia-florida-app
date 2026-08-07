@@ -136,8 +136,6 @@ function defaultDB(){
   return {
     barbers:[
       {id:'b1', name:'Junior', whatsapp:'', pin:'1234', workStart:540, workEnd:1140, workDays:[2,3,4,5,6],
-        scheduleGroups:[{id:'g1', days:[2,3,4], start:540, end:1140},{id:'g2', days:[5,6], start:540, end:1140}]},
-      {id:'b2', name:'Yuri', whatsapp:'', pin:'1234', workStart:540, workEnd:1140, workDays:[2,3,4,5,6],
         scheduleGroups:[{id:'g1', days:[2,3,4], start:540, end:1140},{id:'g2', days:[5,6], start:540, end:1140}]}
     ],
     services:[
@@ -174,6 +172,8 @@ async function loadDB(){
   let migrated = false;
   if(db.barbers[0] && db.barbers[0].name==='Barbeiro 1'){ db.barbers[0].name='Junior'; migrated=true; }
   if(db.barbers[1] && db.barbers[1].name==='Barbeiro 2'){ db.barbers[1].name='Yuri'; migrated=true; }
+  if(db.barbers.length>1){ db.barbers = db.barbers.filter(b=>b.name!=='Yuri'); migrated=true; }
+  if(!db.barbers.length) db.barbers = defaultDB().barbers;
   db.barbers.forEach(b=>{
     if(JSON.stringify(b.workDays)===JSON.stringify([1,2,3,4,5,6])){ b.workDays=[2,3,4,5,6]; migrated=true; }
     if(!b.scheduleGroups || !b.scheduleGroups.length){
@@ -285,12 +285,13 @@ function render(){
 function viewFor(view){
   switch(view){
     case 'home': return renderHome();
-    case 'clientBarber': return renderClientBarber();
     case 'clientService': return renderClientService();
     case 'clientDate': return renderClientDate();
     case 'clientSlot': return renderClientSlot();
     case 'clientDetails': return renderClientDetails();
     case 'clientConfirm': return renderClientConfirm();
+    case 'clientLookupPhone': return renderClientLookupPhone();
+    case 'clientMyAppts': return renderClientMyAppts();
     case 'barberLogin': return renderBarberLogin();
     case 'barberDashboard': return renderBarberDashboard();
     case 'barberNewAppt': return renderBarberNewAppt();
@@ -300,25 +301,24 @@ function viewFor(view){
 
 /* ---------------- HOME ---------------- */
 function renderHome(){
+  const barber = db.barbers[0];
   return `
     <div class="topbar">
       <div class="brand">${logoMark(30)}Barbearia Flórida</div>
       <button class="link-btn" onclick="go('barberLogin')">Área do Barbeiro</button>
     </div>
     <div class="content">
-      <div class="center" style="margin:6px 0 20px;display:flex;align-items:center;justify-content:center;gap:14px">${barberPoleIcon(70)}${logoMark(64)}</div>
-      <h1 class="page center">Bem-vindo</h1>
-      <div class="card select" onclick="go('clientBarber')">
-        <div class="row">
-          <div class="avatar">✂️</div>
-          <div class="grow">
-            <div class="name">Agendar horário</div>
-            <div class="sub">Escolha o barbeiro, o serviço e o horário</div>
-          </div>
-          <div>›</div>
-        </div>
+      <div class="center" style="margin:6px 0 14px;display:flex;align-items:center;justify-content:center;gap:14px">${barberPoleIcon(70)}${logoMark(64)}</div>
+      <h1 class="page center" style="margin-bottom:2px">Bem-vindo</h1>
+      <div class="center sub" style="margin-bottom:22px">R. Dr. Francisco da Silva Prado, 358 - Vila Flórida</div>
+      <button class="btn btn-gold" style="padding:20px;font-size:18px;margin-bottom:18px" onclick="go('clientService',{client:{barberId:'${barber.id}'}})">Agendar horário</button>
+      <div class="row" style="justify-content:space-around;text-align:center;margin-bottom:22px">
+        <div style="flex:1"><div style="font-size:26px">✂️</div><div class="sub" style="margin-top:4px">Escolha o serviço</div></div>
+        <div style="flex:1"><div style="font-size:26px">📅</div><div class="sub" style="margin-top:4px">Escolha o dia e horário</div></div>
+        <div style="flex:1"><div style="font-size:26px">✅</div><div class="sub" style="margin-top:4px">Confirme</div></div>
       </div>
-      <div class="banner" style="font-size:11px">Dica: adicione esta página à tela inicial do celular (menu do navegador → "Adicionar à tela de início") pra abrir como um app.</div>
+      <button class="link-btn" style="display:block;margin:0 auto 20px;text-align:center" onclick="go('clientLookupPhone')">Ver meus agendamentos</button>
+      <div class="banner" style="font-size:11px">Adicione esta página à tela inicial do seu celular para abrir como um app.</div>
     </div>
   `;
 }
@@ -331,36 +331,19 @@ function steps(activeIdx, total){
   return h;
 }
 
-function renderClientBarber(){
-  let cards = db.barbers.map(b=>`
-    <div class="card select" onclick="go('clientService',{client:{barberId:'${b.id}'}})">
-      <div class="row">
-        <div class="avatar">💈</div>
-        <div class="grow"><div class="name">${esc(b.name)}</div><div class="sub">Toque para escolher</div></div>
-        <div>›</div>
-      </div>
-    </div>`).join('');
-  return `
-    <div class="topbar"><button class="link-btn" onclick="go('home')">‹ Início</button></div>
-    <div class="content">
-      ${steps(0,4)}
-      <div class="screen-title">Passo 1 de 4</div>
-      <h1 class="page">Escolha o barbeiro</h1>
-      ${cards}
-    </div>`;
-}
 
 function renderClientService(){
   const c = state.client;
   if(!c.serviceQty) c.serviceQty = {};
-  let cards = db.services.map(s=>{
+  const orderedServices = db.services.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt-BR'));
+  let cards = orderedServices.map(s=>{
     const qty = c.serviceQty[s.id]||0;
     return `
     <div class="card svc-select ${qty>0?'checked':''}">
       <div class="row">
         <div class="grow">
           <div class="name">${esc(s.name)}</div>
-          <div class="sub">${s.duration} min · R$ ${s.price.toFixed(2)} cada</div>
+          <div class="sub">R$ ${s.price.toFixed(2)} cada</div>
         </div>
         <div class="qtystepper">
           <button type="button" class="qtybtn" ${qty===0?'disabled':''} onclick="changeServiceQty('${s.id}',-1)">−</button>
@@ -375,10 +358,10 @@ function renderClientService(){
   const totalDuration = clientTotalDuration();
   const totalPrice = clientTotalPrice();
   return `
-    <div class="topbar"><button class="link-btn" onclick="go('clientBarber')">‹ Voltar</button></div>
+    <div class="topbar"><button class="link-btn" onclick="go('home')">‹ Início</button></div>
     <div class="content" style="${selected.length?'padding-bottom:160px':''}">
-      ${steps(1,4)}
-      <div class="screen-title">Passo 2 de 4</div>
+      ${steps(0,3)}
+      <div class="screen-title">Passo 1 de 3</div>
       <h1 class="page">Escolha o(s) serviço(s)</h1>
       <div class="sub" style="margin-bottom:12px">Toque em + para adicionar. Dá pra repetir um serviço (ex: 2 cortes, pai e filho).</div>
       ${cards}
@@ -438,7 +421,7 @@ function renderClientDate(){
   const item = c.items[c.itemIndex];
   const multi = c.items.length>1;
   const today = new Date(todayStr()+'T00:00:00');
-  const maxDate = new Date(today); maxDate.setDate(maxDate.getDate()+29);
+  const maxDate = new Date(today); maxDate.setDate(maxDate.getDate()+30); // janela fixa de 31 dias (hoje + 30)
 
   if(!state.calMonth) state.calMonth = {y: today.getFullYear(), m: today.getMonth()};
   const {y,m} = state.calMonth;
@@ -455,7 +438,7 @@ function renderClientDate(){
     const d = `${y}-${pad(m+1)}-${pad(day)}`;
     const dObj = new Date(y,m,day);
     const inRange = dObj>=today && dObj<=maxDate;
-    const hasSlots = inRange && getSlots(c.barberId, d, item.duration, 15, extraBusyForItem(item, d)).length>0;
+    const hasSlots = inRange && getSlots(c.barberId, d, item.duration, 30, extraBusyForItem(item, d)).length>0;
     cells += `<div class="calday ${hasSlots?'':'muted'} ${item.date===d?'active':''}" ${hasSlots?`onclick="selectClientDate('${d}')"`:''}>${day}</div>`;
   }
   const weekdayLabels = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
@@ -464,8 +447,8 @@ function renderClientDate(){
   return `
     <div class="topbar"><button class="link-btn" onclick="backFromDate()">‹ Voltar</button></div>
     <div class="content">
-      ${steps(2,4)}
-      <div class="screen-title">Passo 3 de 4${multi?` · Serviço ${c.itemIndex+1} de ${c.items.length}`:''}</div>
+      ${steps(1,3)}
+      <div class="screen-title">Passo 2 de 3${multi?` · Serviço ${c.itemIndex+1} de ${c.items.length}`:''}</div>
       <h1 class="page">Escolha o dia${multi?` — ${esc(item.name)}`:''}</h1>
       ${multi?`<div class="sub" style="margin-bottom:12px">Pode ser no mesmo dia dos outros serviços ou em um dia diferente.</div>`:''}
       <div class="calnav">
@@ -507,14 +490,14 @@ function renderClientSlot(){
   const item = c.items[c.itemIndex];
   const multi = c.items.length>1;
   const barber = db.barbers.find(b=>b.id===c.barberId);
-  const slots = getSlots(c.barberId, item.date, item.duration, 15, extraBusyForItem(item, item.date));
+  const slots = getSlots(c.barberId, item.date, item.duration, 30, extraBusyForItem(item, item.date));
   let grid = slots.length
     ? '<div class="slotgrid">'+slots.map(m=>`<div class="slotbtn ${item.slot===m?'active':''}" onclick="selectClientSlot(${m})">${minToLabel(m)}</div>`).join('')+'</div>'
     : '<div class="empty">Sem horários livres nesse dia para esse serviço.<br>Tente outra data.</div>';
   return `
     <div class="topbar"><button class="link-btn" onclick="go('clientDate')">‹ Voltar</button></div>
     <div class="content">
-      ${steps(2,4)}
+      ${steps(1,3)}
       <div class="screen-title"><b>${esc(barber.name)}</b> · ${esc(item.name)}${multi?` (${c.itemIndex+1} de ${c.items.length})`:''} · ${prettyDate(item.date)}</div>
       <h1 class="page">Escolha o horário</h1>
       ${grid}
@@ -543,8 +526,8 @@ function renderClientDetails(){
   return `
     <div class="topbar"><button class="link-btn" onclick="go('clientSlot')">‹ Voltar</button></div>
     <div class="content">
-      ${steps(3,4)}
-      <div class="screen-title">Passo 4 de 4</div>
+      ${steps(2,3)}
+      <div class="screen-title">Passo 3 de 3</div>
       <h1 class="page">Seus dados</h1>
       <div class="card">
         ${items.map(it=>`<div class="row" style="margin-bottom:4px"><div class="grow sub">${esc(it.name)} · ${prettyDate(it.date)} às ${minToLabel(it.slot)}</div><div class="sub">R$ ${it.price.toFixed(2)}</div></div>`).join('')}
@@ -569,7 +552,7 @@ async function submitClientBooking(){
   // re-checa cada item (segurança contra conflito de última hora)
   for(let i=0;i<c.items.length;i++){
     const item = c.items[i];
-    const stillFree = getSlots(c.barberId, item.date, item.duration, 15, extraBusyForItem(item, item.date)).includes(item.slot);
+    const stillFree = getSlots(c.barberId, item.date, item.duration, 30, extraBusyForItem(item, item.date)).includes(item.slot);
     if(!stillFree){
       alert(`O horário de "${item.name}" (${prettyDate(item.date)} às ${minToLabel(item.slot)}) acabou de ser ocupado. Escolha outro horário para esse serviço.`);
       c.itemIndex = i;
@@ -628,7 +611,7 @@ function renderClientConfirm(){
           <div class="row" style="margin-top:6px;border-top:1px solid var(--line);padding-top:8px"><div class="grow name">Total</div><div class="name">R$ ${totalPrice.toFixed(2)}</div></div>
         </div>
       `}
-      ${items.map(it=>`<a class="btn btn-outline" style="margin-top:10px;text-decoration:none;box-sizing:border-box;display:block" target="_blank" href="${makeGCalUrl(it.date, it.slot, it.duration, it.name+' - '+barber.name, 'Agendamento na barbearia. Valor R$ '+it.price.toFixed(2))}">Adicionar${multi?' '+esc(it.name):''} ao Google Agenda${multi?'':' (opcional)'}</a>`).join('')}
+      ${items.map(it=>`<a class="btn btn-outline" style="margin-top:10px;text-decoration:none;box-sizing:border-box;display:block" href="${makeGCalUrl(it.date, it.slot, it.duration, it.name+' - '+barber.name, 'Agendamento na barbearia. Valor R$ '+it.price.toFixed(2))}">Adicionar${multi?' '+esc(it.name):''} ao Google Agenda${multi?'':' (opcional)'}</a>`).join('')}
       ${barber.whatsapp ? `<button class="btn btn-steel" style="margin-top:10px" onclick="openWhats('${barber.whatsapp}','Olá ${esc(barber.name)}! Confirmando meu agendamento.')">Falar com meu Barbeiro</button>` : ''}
       <button class="btn btn-gold" style="margin-top:10px" onclick="go('home')">Concluir</button>
     </div>`;
@@ -657,6 +640,65 @@ function makeICS(barber, service, c){
     'END:VEVENT','END:VCALENDAR'
   ].join('\r\n');
   return 'data:text/calendar;charset=utf-8,'+encodeURIComponent(ics);
+}
+
+/* ---------------- CLIENT: MEUS AGENDAMENTOS ---------------- */
+function renderClientLookupPhone(){
+  return `
+    <div class="topbar"><button class="link-btn" onclick="go('home')">‹ Início</button></div>
+    <div class="content">
+      <h1 class="page">Meus agendamentos</h1>
+      <div class="sub" style="margin-bottom:12px">Digite o WhatsApp usado no agendamento para ver e, se precisar, cancelar seus horários.</div>
+      <label class="field-label">WhatsApp (com DDD)</label>
+      <input id="lookupPhone" placeholder="11999998888">
+      <button class="btn btn-gold" onclick="doClientLookup()">Buscar</button>
+    </div>`;
+}
+function doClientLookup(){
+  const phone = (document.getElementById('lookupPhone').value||'').trim();
+  if(!phone){ alert('Informe o WhatsApp usado no agendamento.'); return; }
+  state.lookupPhone = phone;
+  go('clientMyAppts');
+}
+function renderClientMyAppts(){
+  const wanted = toWaNumber(state.lookupPhone);
+  const appts = db.appointments
+    .filter(a=>toWaNumber(a.clientPhone)===wanted)
+    .sort((a,b)=> a.date===b.date ? a.start-b.start : (a.date<b.date?-1:1));
+  const barber = db.barbers[0];
+  let items = appts.length ? appts.map(a=>`
+    <div class="appt ${a.status}">
+      <div class="row" style="align-items:flex-start">
+        <div class="grow">
+          <div class="appt-time">${prettyDate(a.date)} · ${minToLabel(a.start)}</div>
+          <div class="name">${esc(a.serviceName)}</div>
+          <div class="sub">R$ ${a.servicePrice.toFixed(2)}</div>
+        </div>
+        <div class="price-tag">${a.status==='cancelado'?'cancelado':'confirmado'}</div>
+      </div>
+      ${a.status!=='cancelado' ? `
+      <div class="flexbtns">
+        <button class="btn btn-sm btn-red" onclick="clientCancelAppt('${a.id}')">Cancelar</button>
+      </div>` : ''}
+    </div>`).join('') : '<div class="empty">Nenhum agendamento encontrado para esse WhatsApp.</div>';
+  return `
+    <div class="topbar"><button class="link-btn" onclick="go('clientLookupPhone')">‹ Voltar</button></div>
+    <div class="content">
+      <h1 class="page">Meus agendamentos</h1>
+      ${items}
+    </div>`;
+}
+async function clientCancelAppt(id){
+  const a = db.appointments.find(x=>x.id===id);
+  if(!a) return;
+  if(!confirm('Cancelar este agendamento?')) return;
+  a.status = 'cancelado';
+  await saveDB();
+  render();
+  const barber = db.barbers.find(b=>b.id===a.barberId);
+  if(barber && barber.whatsapp){
+    openWhats(barber.whatsapp, `Olá ${barber.name}! Sou ${a.clientName} e preciso cancelar meu horário de ${a.serviceName} do dia ${prettyDate(a.date)} às ${minToLabel(a.start)}.`);
+  }
 }
 
 /* ---------------- BARBER LOGIN ---------------- */
@@ -735,6 +777,7 @@ function renderBarberDashboard(){
 function setBarberTab(t){ state.barberTab = t; render(); }
 
 function renderDayAdjust(barber, date){
+  blkSelectedDays = [];
   const key = dayOverrideKey(barber.id, date);
   const override = db.dayOverrides[key];
   const normallyOpen = barber.workDays.includes(dow(date));
@@ -770,9 +813,21 @@ function renderDayAdjust(barber, date){
           <div><label class="field-label">até</label><input id="blkEnd" placeholder="13:00"></div>
         </div>
         <input id="blkLabel" placeholder="Motivo (ex: Almoço)">
+        <label class="field-label">Repetir também em (opcional)</label>
+        <div class="dayrow" id="blkDayRow">${['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'].map((l,i)=>`<div class="daychip" id="blkDay${i}" onclick="toggleBlkDay(${i})">${l}</div>`).join('')}</div>
+        <label class="field-label">Repetir por quantas semanas</label>
+        <input id="blkWeeks" type="number" min="1" max="26" value="8">
         <button class="btn btn-sm btn-outline" onclick="addBlock('${barber.id}','${date}')">+ Bloquear horário</button>
       ` : ''}
     </div>`;
+}
+let blkSelectedDays = [];
+function toggleBlkDay(i){
+  const el = document.getElementById('blkDay'+i);
+  if(!el) return;
+  const idx = blkSelectedDays.indexOf(i);
+  if(idx>=0){ blkSelectedDays.splice(idx,1); el.classList.remove('on'); }
+  else { blkSelectedDays.push(i); el.classList.add('on'); }
 }
 function showOpenForm(barberId, date){
   document.getElementById('openFormBox').innerHTML = `
@@ -812,6 +867,23 @@ async function addBlock(barberId, date){
   const label = (document.getElementById('blkLabel').value||'Bloqueado').trim();
   if(s==null||e==null||e<=s){ alert('Informe horários válidos, ex: 12:00'); return; }
   db.blocks.push({id:uid(), barberId, date, start:s, end:e, label});
+  const weeks = Math.min(26, Math.max(1, parseInt((document.getElementById('blkWeeks')||{}).value)||8));
+  if(blkSelectedDays.length){
+    const startDate = new Date(date+'T00:00:00');
+    for(let w=0; w<weeks; w++){
+      blkSelectedDays.forEach(targetDow=>{
+        // acha a próxima ocorrência desse dia da semana a partir da data base + w semanas
+        const base = new Date(startDate); base.setDate(base.getDate()+w*7);
+        const diff = (targetDow - base.getDay() + 7) % 7;
+        const occ = new Date(base); occ.setDate(occ.getDate()+diff);
+        const occStr = occ.getFullYear()+'-'+pad(occ.getMonth()+1)+'-'+pad(occ.getDate());
+        if(occStr===date) return; // já criado acima
+        const already = db.blocks.some(b=>b.barberId===barberId && b.date===occStr && b.start===s && b.end===e);
+        if(!already) db.blocks.push({id:uid(), barberId, date:occStr, start:s, end:e, label});
+      });
+    }
+  }
+  blkSelectedDays = [];
   await saveDB();
   render();
 }
@@ -836,18 +908,25 @@ function renderAgendaTab(barber){
         </div>
         <div class="price-tag">${a.status==='cancelado'?'cancelado':'confirmado'}</div>
       </div>
-      ${a.status!=='cancelado' ? `
       <div class="flexbtns">
+        ${a.status!=='cancelado' ? `
         <button class="btn btn-sm btn-steel" onclick="openWhats('${a.clientPhone}','Olá ${esc(a.clientName)}! Lembrete: seu horário de ${esc(a.serviceName)} é dia ${prettyDate(a.date)} às ${minToLabel(a.start)}. Até lá!')">Lembrete WhatsApp</button>
-        <a class="btn btn-sm btn-outline" style="text-decoration:none" target="_blank" href="${makeGCalUrl(a.date, a.start, a.end-a.start, a.serviceName+' - '+a.clientName, 'Cliente: '+a.clientName+' · Valor R$ '+a.servicePrice.toFixed(2))}">📅 Agenda</a>
-        <button class="btn btn-sm btn-red" onclick="cancelAppt('${a.id}')">Cancelar</button>
-      </div>` : ''}
+        <a class="btn btn-sm btn-outline" style="text-decoration:none" href="${makeGCalUrl(a.date, a.start, a.end-a.start, a.serviceName+' - '+a.clientName, 'Cliente: '+a.clientName+' · Valor R$ '+a.servicePrice.toFixed(2))}">📅 Agenda</a>
+        <button class="btn btn-sm btn-red" onclick="cancelAppt('${a.id}')">Cancelar</button>` : ''}
+        <button class="btn btn-sm btn-outline" onclick="deleteAppt('${a.id}')">Excluir</button>
+      </div>
     </div>`).join('') : '<div class="empty">Nenhum agendamento neste dia.</div>';
 
+  const showYear = !!state.barberShowYear;
   return `
     <h1 class="page">Agenda</h1>
     ${renderBarberCalendar(barber, date)}
-    ${renderMonthSummary(barber, state.barberCalMonth.y, state.barberCalMonth.m)}
+    <div class="row" style="margin-bottom:8px">
+      <div class="grow"></div>
+      <button class="link-btn" onclick="state.barberShowYear=${!showYear};render()">${showYear?'‹ Ver resumo do mês':'Ver resumo do ano ›'}</button>
+    </div>
+    ${showYear ? renderYearSummary(barber, state.barberCalMonth.y) : renderMonthSummary(barber, state.barberCalMonth.y, state.barberCalMonth.m)}
+    ${renderAvailabilityPreview(barber)}
     ${renderDayAdjust(barber, date)}
     <button class="btn btn-gold" style="margin:12px 0 16px" onclick="go('barberNewAppt')">+ Novo agendamento manual</button>
     <div class="name" style="margin-bottom:8px">${prettyDate(date)}</div>
@@ -867,6 +946,73 @@ function renderMonthSummary(barber, y, m){
       <div class="row" style="margin-bottom:6px"><div class="grow sub">Cancelados</div><div class="name">${canceled.length}</div></div>
       <div class="row"><div class="grow sub">Faturamento (confirmados)</div><div class="name" style="color:var(--gold)">R$ ${revenue.toFixed(2)}</div></div>
     </div>`;
+}
+function renderYearSummary(barber, y){
+  const monthNames = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  let totalConfirmed=0, totalCanceled=0, totalRevenue=0;
+  let rows = '';
+  for(let m=0;m<12;m++){
+    const prefix = `${y}-${pad(m+1)}-`;
+    const monthAppts = db.appointments.filter(a=>a.barberId===barber.id && a.date.startsWith(prefix));
+    const confirmed = monthAppts.filter(a=>a.status!=='cancelado');
+    const canceled = monthAppts.filter(a=>a.status==='cancelado');
+    const revenue = confirmed.reduce((sum,a)=>sum+a.servicePrice,0);
+    totalConfirmed += confirmed.length; totalCanceled += canceled.length; totalRevenue += revenue;
+    rows += `<div class="row" style="margin-bottom:6px"><div class="grow sub">${monthNames[m]}</div><div class="sub">${confirmed.length} confirm. · ${canceled.length} canc.</div><div class="name" style="margin-left:8px">R$ ${revenue.toFixed(2)}</div></div>`;
+  }
+  return `
+    <div class="card">
+      <div class="row" style="margin-bottom:10px">
+        <button class="link-btn" onclick="state.barberCalMonth.y=${y-1};render()">‹</button>
+        <div class="grow name" style="text-align:center">Resumo de ${y}</div>
+        <button class="link-btn" onclick="state.barberCalMonth.y=${y+1};render()">›</button>
+      </div>
+      ${rows}
+      <div class="row" style="margin-top:8px;border-top:1px solid var(--line);padding-top:8px">
+        <div class="grow name">Total do ano</div>
+        <div class="sub">${totalConfirmed} confirm. · ${totalCanceled} canc.</div>
+        <div class="name" style="margin-left:8px;color:var(--gold)">R$ ${totalRevenue.toFixed(2)}</div>
+      </div>
+    </div>`;
+}
+function renderAvailabilityPreview(barber){
+  if(!state.availDate) state.availDate = todayStr();
+  const availDate = state.availDate;
+
+  let strip = '';
+  for(let i=0;i<14;i++){
+    const d = addDaysStr(todayStr(), i);
+    const dd = new Date(d+'T00:00:00');
+    const free = getSlots(barber.id, d, 30, 30).length;
+    strip += `<div class="datebtn ${availDate===d?'active':''}" onclick="selectAvailDate('${d}')">
+      ${capFirst(dd.toLocaleDateString('pt-BR',{weekday:'short'}))}<b>${pad(dd.getDate())}</b>
+      <div class="calbadges" style="margin-top:2px">${free>0?`<span class="calbadge green">${free}</span>`:`<span class="calbadge orange">0</span>`}</div>
+    </div>`;
+  }
+
+  const dObj = new Date(availDate+'T00:00:00');
+  const slots = getSlots(barber.id, availDate, 30, 30);
+  const dayLabel = capFirst(dObj.toLocaleDateString('pt-BR',{weekday:'long', day:'2-digit', month:'long'}));
+  const slotsHtml = slots.length
+    ? '<div class="slotgrid">'+slots.map(m=>`<div class="slotbtn" style="cursor:default">${minToLabel(m)}</div>`).join('')+'</div>'
+    : '<div class="empty">Sem horários livres nesse dia.</div>';
+
+  return `
+    <div class="card">
+      <div class="row" style="margin-bottom:8px">
+        <div class="grow name">Disponibilidade (próximas 2 semanas)</div>
+        <button class="link-btn" onclick="state.barberShowAvail=${!state.barberShowAvail};render()">${state.barberShowAvail?'ocultar':'ver'}</button>
+      </div>
+      ${state.barberShowAvail ? `
+        <div class="datestrip">${strip}</div>
+        <div class="sub" style="margin-bottom:8px">${dayLabel} · ${slots.length} horário${slots.length===1?'':'s'} livre${slots.length===1?'':'s'} (blocos de 30min)</div>
+        ${slotsHtml}
+      ` : '<div class="sub">Toque em "ver" para checar, dia a dia, quais horários livres de 30min o barbeiro ainda tem nos próximos 14 dias.</div>'}
+    </div>`;
+}
+function selectAvailDate(d){
+  state.availDate = d;
+  render();
 }
 function renderBarberCalendar(barber, selectedDate){
   if(!state.barberCalMonth){
@@ -922,6 +1068,16 @@ async function cancelAppt(id){
   const a = db.appointments.find(x=>x.id===id);
   if(!confirm('Cancelar este agendamento?')) return;
   a.status = 'cancelado';
+  await saveDB();
+  render();
+  if(a.clientPhone && confirm('Deseja avisar o cliente pelo WhatsApp que o horário foi cancelado?')){
+    const barber = db.barbers.find(b=>b.id===a.barberId);
+    openWhats(a.clientPhone, `Olá ${a.clientName}! Aqui é o ${barber?barber.name:''}. Infelizmente precisei cancelar seu horário de ${a.serviceName} do dia ${prettyDate(a.date)} às ${minToLabel(a.start)}. Qualquer dúvida me chama por aqui!`);
+  }
+}
+async function deleteAppt(id){
+  if(!confirm('Excluir este agendamento definitivamente? Essa ação não pode ser desfeita.')) return;
+  db.appointments = db.appointments.filter(x=>x.id!==id);
   await saveDB();
   render();
 }
@@ -1067,12 +1223,34 @@ function renderBarberNewAppt(){
       <label class="field-label">Data</label>
       <div class="datestrip">${strip}</div>
       ${slotHtml}
-      ${(draft.serviceId && draft.slot!=null) ? '<button class="btn btn-gold" style="margin-top:16px" onclick="submitManualBooking()">Salvar agendamento</button>' : ''}
+      ${(draft.serviceId && draft.slot!=null) ? `
+      <div class="card" style="margin-top:14px">
+        <div class="checkrow">
+          <input type="checkbox" id="manRepeat" ${draft.repeatMonthly?'checked':''} onchange="state.newAppt.repeatMonthly=this.checked;render()">
+          <label for="manRepeat" style="margin:0">Repetir mensalmente (mesmo dia e horário)</label>
+        </div>
+        ${draft.repeatMonthly ? `
+        <label class="field-label" style="margin-top:10px">Repetir por quantos meses</label>
+        <input type="number" min="1" max="12" value="${draft.repeatMonths||3}" onchange="state.newAppt.repeatMonths=parseInt(this.value)||1">
+        <div class="sub">Vamos tentar criar o mesmo horário nos próximos meses. Se algum mês já estiver ocupado nesse horário, avisamos e pulamos ele.</div>
+        ` : ''}
+      </div>
+      <button class="btn btn-gold" style="margin-top:16px" onclick="submitManualBooking()">Salvar agendamento</button>` : ''}
     </div>`;
 }
 function pickManualDate(d){ state.newAppt = Object.assign({date:todayStr()}, state.newAppt, {date:d}); render(); }
 function pickManualService(sid){ state.newAppt = Object.assign({date:todayStr()}, state.newAppt, {serviceId:sid, slot:null}); render(); }
 function pickManualSlot(m){ state.newAppt.slot = m; render(); }
+function addMonthsStr(base, n){
+  const d = new Date(base+'T00:00:00');
+  const targetDay = d.getDate();
+  d.setMonth(d.getMonth()+n);
+  // se o mês de destino não tem esse dia (ex: 31), o JS já ajusta para o próximo mês — corrige voltando pro último dia do mês certo
+  if(d.getDate() !== targetDay && d.getDate() < targetDay){
+    d.setDate(0);
+  }
+  return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+}
 
 async function submitManualBooking(){
   const barber = db.barbers.find(b=>b.id===state.barberSession);
@@ -1083,18 +1261,39 @@ async function submitManualBooking(){
   const service = db.services.find(s=>s.id===d.serviceId);
   const stillFree = getSlots(barber.id, d.date, service.duration).includes(d.slot);
   if(!stillFree){ alert('Esse horário acabou de ser ocupado.'); render(); return; }
+  const groupId = d.repeatMonthly ? uid() : null;
   const appt = {
-    id: uid(), barberId:barber.id, serviceId:service.id, serviceName:service.name, servicePrice:service.price,
+    id: uid(), groupId, barberId:barber.id, serviceId:service.id, serviceName:service.name, servicePrice:service.price,
     clientName:name, clientPhone:phone, date:d.date, start:d.slot, end:d.slot+service.duration,
     status:'confirmado', source:'barbeiro', createdAt:Date.now()
   };
   db.appointments.push(appt);
+  let skipped = [];
+  if(d.repeatMonthly){
+    const months = Math.min(12, Math.max(1, d.repeatMonths||3));
+    for(let i=1;i<=months;i++){
+      const futureDate = addMonthsStr(d.date, i);
+      const free = getSlots(barber.id, futureDate, service.duration).includes(d.slot);
+      if(free){
+        db.appointments.push({
+          id: uid(), groupId, barberId:barber.id, serviceId:service.id, serviceName:service.name, servicePrice:service.price,
+          clientName:name, clientPhone:phone, date:futureDate, start:d.slot, end:d.slot+service.duration,
+          status:'confirmado', source:'barbeiro', recurring:true, createdAt:Date.now()
+        });
+      } else {
+        skipped.push(prettyDate(futureDate));
+      }
+    }
+  }
   await saveDB();
   if(phone){
     openWhats(phone, `Olá ${name}! Aqui é o ${barber.name}. Confirmando seu horário de ${service.name} em ${prettyDate(d.date)} às ${minToLabel(d.slot)}. Valor R$ ${service.price.toFixed(2)}.`);
   }
   state.newAppt = null;
   go('barberDashboard');
+  if(skipped.length){
+    setTimeout(()=>alert('Alguns meses da repetição já estavam ocupados nesse horário e foram pulados: '+skipped.join(', ')), 200);
+  }
 }
 
 /* ---------------- boot ---------------- */
