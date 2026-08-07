@@ -17,7 +17,7 @@
   :root{
     --bg:#1B1815; --bg-alt:#242019; --card:#2A241D; --ink:#F1E9DC; --ink-dim:#C9BFAE;
     --gold:#2E6DA4; --gold-ink:#F1E9DC; --red:#8C2F2F; --steel:#3A5866; --line:rgba(241,233,220,0.12);
-    --pole-red:#C6403D; --pole-blue:#2E5C8F; --pole-white:#F1E9DC;
+    --pole-red:#C6403D; --pole-blue:#2E5C8F; --pole-white:#F1E9DC; --lead:#4A4D52;
   }
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--ink);font-family:'Inter',sans-serif;-webkit-font-smoothing:antialiased;}
@@ -307,18 +307,24 @@ function renderHome(){
       <div class="brand">${logoMark(30)}Barbearia Flórida</div>
       <button class="link-btn" onclick="go('barberLogin')">Área do Barbeiro</button>
     </div>
-    <div class="content">
-      <div class="center" style="margin:6px 0 14px;display:flex;align-items:center;justify-content:center;gap:14px">${barberPoleIcon(70)}${logoMark(64)}</div>
-      <h1 class="page center" style="margin-bottom:2px">Bem-vindo</h1>
-      <div class="center sub" style="margin-bottom:22px">R. Dr. Francisco da Silva Prado, 358 - Vila Flórida</div>
-      <button class="btn btn-gold" style="padding:20px;font-size:18px;margin-bottom:18px" onclick="go('clientService',{client:{barberId:'${barber.id}'}})">Agendar horário</button>
-      <div class="row" style="justify-content:space-around;text-align:center;margin-bottom:22px">
-        <div style="flex:1"><div style="font-size:26px">✂️</div><div class="sub" style="margin-top:4px">Escolha o serviço</div></div>
-        <div style="flex:1"><div style="font-size:26px">📅</div><div class="sub" style="margin-top:4px">Escolha o dia e horário</div></div>
-        <div style="flex:1"><div style="font-size:26px">✅</div><div class="sub" style="margin-top:4px">Confirme</div></div>
+    <div class="content" style="display:flex;flex-direction:column">
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:space-between;min-height:76vh">
+        <div>
+          <div class="center" style="margin:14px 0 18px;display:flex;align-items:center;justify-content:center;gap:16px">${barberPoleIcon(78)}${logoMark(72)}</div>
+          <h1 class="page center" style="margin-bottom:8px">Bem-vindo</h1>
+          <div class="center" style="font-weight:700;font-size:15px;line-height:1.4;padding:0 10px">R. Dr. Francisco da Silva Prado, 358 - Vila Flórida</div>
+        </div>
+        <div>
+          <button class="btn btn-gold" style="padding:19px;font-size:18px;margin-bottom:24px" onclick="go('clientService',{client:{barberId:'${barber.id}'}})">Agendar horário</button>
+          <div class="row" style="justify-content:space-around;text-align:center;margin-bottom:24px">
+            <div style="flex:1"><div style="font-size:26px">✂️</div><div class="sub" style="margin-top:6px;font-size:12px">Escolha o serviço</div></div>
+            <div style="flex:1"><div style="font-size:26px">📅</div><div class="sub" style="margin-top:6px;font-size:12px">Escolha o dia e horário</div></div>
+            <div style="flex:1"><div style="font-size:26px">✅</div><div class="sub" style="margin-top:6px;font-size:12px">Confirme</div></div>
+          </div>
+          <button class="btn" style="padding:14px;font-size:14px;background:var(--lead);color:#fff" onclick="go('clientLookupPhone')">Ver meus agendamentos</button>
+        </div>
+        <div class="banner" style="font-size:11px;text-align:center;margin-bottom:0">Adicione esta página à tela inicial do seu celular para abrir como um app.</div>
       </div>
-      <button class="link-btn" style="display:block;margin:0 auto 20px;text-align:center" onclick="go('clientLookupPhone')">Ver meus agendamentos</button>
-      <div class="banner" style="font-size:11px">Adicione esta página à tela inicial do seu celular para abrir como um app.</div>
     </div>
   `;
 }
