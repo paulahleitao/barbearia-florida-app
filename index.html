@@ -670,7 +670,7 @@ function renderClientMyAppts(){
   const wanted = toWaNumber(state.lookupPhone);
   const appts = db.appointments
     .filter(a=>toWaNumber(a.clientPhone)===wanted)
-    .sort((a,b)=> a.date===b.date ? a.start-b.start : (a.date<b.date?-1:1));
+    .sort((a,b)=> a.date===b.date ? b.start-a.start : (a.date<b.date?1:-1));
   const barber = db.barbers[0];
   let items = appts.length ? appts.map(a=>`
     <div class="appt ${a.status}">
@@ -680,11 +680,11 @@ function renderClientMyAppts(){
           <div class="name">${esc(a.serviceName)}</div>
           <div class="sub">R$ ${a.servicePrice.toFixed(2)}</div>
         </div>
-        <div class="price-tag">${a.status==='cancelado'?'cancelado':'confirmado'}</div>
+        <div class="price-tag" style="background:${a.status==='cancelado'?'var(--lead)':'#3C8C4A'}">${a.status==='cancelado'?'cancelado':'confirmado'}</div>
       </div>
       ${a.status!=='cancelado' ? `
-      <div class="flexbtns">
-        <button class="btn btn-sm btn-red" onclick="clientCancelAppt('${a.id}')">Cancelar</button>
+      <div class="flexbtns" style="justify-content:flex-end">
+        <button class="btn btn-sm btn-red" style="flex:none;padding:6px 14px;font-size:11px" onclick="clientCancelAppt('${a.id}')">Cancelar</button>
       </div>` : ''}
     </div>`).join('') : '<div class="empty">Nenhum agendamento encontrado para esse WhatsApp.</div>';
   return `
@@ -912,7 +912,7 @@ function renderAgendaTab(barber){
           <div class="name">${esc(a.clientName)}</div>
           <div class="sub">${esc(a.serviceName)} · R$ ${a.servicePrice.toFixed(2)} <span class="pill">${a.source==='barbeiro'?'agendado por você':'cliente'}</span></div>
         </div>
-        <div class="price-tag">${a.status==='cancelado'?'cancelado':'confirmado'}</div>
+        <div class="price-tag" style="background:${a.status==='cancelado'?'var(--lead)':'#3C8C4A'}">${a.status==='cancelado'?'cancelado':'confirmado'}</div>
       </div>
       <div class="flexbtns">
         ${a.status!=='cancelado' ? `
