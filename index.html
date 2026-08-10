@@ -136,7 +136,8 @@ function defaultDB(){
   return {
     barbers:[
       {id:'b1', name:'Junior', whatsapp:'', pin:'1234', workStart:540, workEnd:1140, workDays:[2,3,4,5,6],
-        scheduleGroups:[{id:'g1', days:[2,3,4], start:540, end:1140},{id:'g2', days:[5,6], start:540, end:1140}]}
+        scheduleGroups:[{id:'g1', days:[2,3,4], start:540, end:1140},{id:'g2', days:[5,6], start:540, end:1140}],
+        recurringBlocks:[]}
     ],
     services:[
       {id:'s1', name:'Corte simples', duration:30, price:35},
@@ -182,6 +183,7 @@ async function loadDB(){
       b.scheduleGroups = [{id:uid(), days:(b.workDays||[]).slice(), start:b.workStart||540, end:b.workEnd||1140}];
       migrated=true;
     }
+    if(!b.recurringBlocks){ b.recurringBlocks = []; migrated=true; }
   });
   (db.services||[]).forEach(s=>{
     if(s.name && s.name.trim().toLowerCase()==='luzes' && s.duration===30){ s.duration=60; migrated=true; }
@@ -262,9 +264,12 @@ function getSlots(barberId, dateStr, duration, step, extraBusy, excludeApptId){
   step = step || 30;
   const hours = getEffectiveHours(barberId, dateStr);
   if(!hours) return [];
+  const barber = db.barbers.find(b=>b.id===barberId);
+  const d = dow(dateStr);
+  const recurringBlocks = (barber && barber.recurringBlocks) ? barber.recurringBlocks.filter(rb=>rb.days.includes(d)) : [];
   const dayAppts = db.appointments.filter(a=>a.barberId===barberId && a.date===dateStr && a.status!=='cancelado' && a.id!==excludeApptId);
   const dayBlocks = db.blocks.filter(b=>b.barberId===barberId && b.date===dateStr);
-  const busy = dayAppts.concat(dayBlocks).concat(extraBusy||[]);
+  const busy = dayAppts.concat(dayBlocks).concat(recurringBlocks).concat(extraBusy||[]);
   const slots=[];
   const isToday = dateStr===todayStr();
   const now = nowMinutes();
@@ -797,10 +802,16 @@ function renderBarberDashboard(){
       <div class="tab ${tab==='config'?'active':''}" onclick="setBarberTab('config')">Config.</div>
     </div>`;
 }
-function setBarberTab(t){ state.barberTab = t; render(); }
+function setBarberTab(t){
+  state.barberTab = t;
+  state.showBlockForm = false;
+  state.showRecurringBlockForm = false;
+  state.showMonthRevenue = false;
+  recurBlockSelectedDays = [];
+  render();
+}
 
 function renderDayAdjust(barber, date){
-  blkSelectedDays = [];
   const key = dayOverrideKey(barber.id, date);
   const override = db.dayOverrides[key];
   const normallyOpen = barber.workDays.includes(dow(date));
@@ -809,48 +820,58 @@ function renderDayAdjust(barber, date){
   else if(override && override.mode==='open') statusLabel = `Aberto (exceção) ${minToLabel(override.workStart)}–${minToLabel(override.workEnd)}`;
   else statusLabel = normallyOpen ? 'Aberto (padrão)' : 'Fechado (padrão)';
 
+  const dayLabels = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  const d = dow(date);
+  const recurringToday = (barber.recurringBlocks||[]).filter(rb=>rb.days.includes(d));
   const dayBlocks = db.blocks.filter(b=>b.barberId===barber.id && b.date===date);
-  let blockList = dayBlocks.map(b=>`
+  const hasAnyBlock = recurringToday.length || dayBlocks.length;
+  let blockList = hasAnyBlock ? (
+    recurringToday.map(b=>`
+    <div class="row" style="margin-bottom:8px">
+      <div class="grow sub">${minToLabel(b.start)}–${minToLabel(b.end)} · ${esc(b.label)} <span class="pill">fixo, toda ${dayLabels[d]}</span></div>
+    </div>`).join('')
+    + dayBlocks.map(b=>`
     <div class="row" style="margin-bottom:8px">
       <div class="grow sub">${minToLabel(b.start)}–${minToLabel(b.end)} · ${esc(b.label)}</div>
       <button class="btn btn-sm btn-red" onclick="removeBlock('${b.id}')">Remover</button>
-    </div>`).join('');
+    </div>`).join('')
+  ) : '<div class="sub" style="margin-bottom:8px">Nenhum bloqueio nesse dia.</div>';
 
   const isEffectivelyOpen = !!getEffectiveHours(barber.id, date);
+  const showForm = !!state.showBlockForm;
 
   return `
     <div class="card">
-      <div class="name">Ajustes do dia</div>
+      <div class="name" style="margin-bottom:4px">Status do dia</div>
       <div class="sub" style="margin-bottom:10px">${statusLabel}</div>
-      <div class="flexbtns" style="margin-bottom:10px">
+      <div class="flexbtns">
         ${normallyOpen
           ? `<button class="btn btn-sm btn-red" onclick="setDayClosed('${barber.id}','${date}')">Fechar este dia</button>`
           : `<button class="btn btn-sm btn-steel" onclick="showOpenForm('${barber.id}','${date}')">Abrir este dia</button>`}
         ${override ? `<button class="btn btn-sm btn-outline" onclick="resetDayOverride('${barber.id}','${date}')">Voltar ao padrão</button>` : ''}
       </div>
       <div id="openFormBox"></div>
-      ${isEffectivelyOpen ? `
-        ${blockList}
+    </div>
+    ${isEffectivelyOpen ? `
+    <div class="card">
+      <div class="name" style="margin-bottom:4px">Bloqueios de horário</div>
+      <div class="sub" style="margin-bottom:10px">Pausas nesse dia específico. Para uma pausa fixa toda semana (ex: almoço), cadastre em Config. → Bloqueios fixos.</div>
+      ${blockList}
+      ${showForm ? `
         <div class="grid2">
           <div><label class="field-label">Bloquear de</label><input id="blkStart" placeholder="12:00"></div>
           <div><label class="field-label">até</label><input id="blkEnd" placeholder="13:00"></div>
         </div>
-        <input id="blkLabel" placeholder="Motivo (ex: Almoço)">
-        <label class="field-label">Repetir também em (opcional)</label>
-        <div class="dayrow" id="blkDayRow">${['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'].map((l,i)=>`<div class="daychip" id="blkDay${i}" onclick="toggleBlkDay(${i})">${l}</div>`).join('')}</div>
-        <label class="field-label">Repetir por quantas semanas</label>
-        <input id="blkWeeks" type="number" min="1" max="26" value="8">
-        <button class="btn btn-sm btn-outline" onclick="addBlock('${barber.id}','${date}')">+ Bloquear horário</button>
-      ` : ''}
-    </div>`;
-}
-let blkSelectedDays = [];
-function toggleBlkDay(i){
-  const el = document.getElementById('blkDay'+i);
-  if(!el) return;
-  const idx = blkSelectedDays.indexOf(i);
-  if(idx>=0){ blkSelectedDays.splice(idx,1); el.classList.remove('on'); }
-  else { blkSelectedDays.push(i); el.classList.add('on'); }
+        <input id="blkLabel" placeholder="Motivo (ex: Consulta)">
+        <div class="flexbtns" style="margin-top:10px">
+          <button class="btn btn-sm btn-gold" onclick="addBlock('${barber.id}','${date}')">Salvar bloqueio</button>
+          <button class="btn btn-sm btn-outline" onclick="state.showBlockForm=false;render()">Cancelar</button>
+        </div>
+      ` : `
+        <button class="btn btn-sm btn-outline" onclick="state.showBlockForm=true;render()">+ Bloqueio só nesse dia</button>
+      `}
+    </div>
+    ` : ''}`;
 }
 function showOpenForm(barberId, date){
   document.getElementById('openFormBox').innerHTML = `
@@ -890,23 +911,7 @@ async function addBlock(barberId, date){
   const label = (document.getElementById('blkLabel').value||'Bloqueado').trim();
   if(s==null||e==null||e<=s){ alert('Informe horários válidos, ex: 12:00'); return; }
   db.blocks.push({id:uid(), barberId, date, start:s, end:e, label});
-  const weeks = Math.min(26, Math.max(1, parseInt((document.getElementById('blkWeeks')||{}).value)||8));
-  if(blkSelectedDays.length){
-    const startDate = new Date(date+'T00:00:00');
-    for(let w=0; w<weeks; w++){
-      blkSelectedDays.forEach(targetDow=>{
-        // acha a próxima ocorrência desse dia da semana a partir da data base + w semanas
-        const base = new Date(startDate); base.setDate(base.getDate()+w*7);
-        const diff = (targetDow - base.getDay() + 7) % 7;
-        const occ = new Date(base); occ.setDate(occ.getDate()+diff);
-        const occStr = occ.getFullYear()+'-'+pad(occ.getMonth()+1)+'-'+pad(occ.getDate());
-        if(occStr===date) return; // já criado acima
-        const already = db.blocks.some(b=>b.barberId===barberId && b.date===occStr && b.start===s && b.end===e);
-        if(!already) db.blocks.push({id:uid(), barberId, date:occStr, start:s, end:e, label});
-      });
-    }
-  }
-  blkSelectedDays = [];
+  state.showBlockForm = false;
   await saveDB();
   render();
 }
@@ -964,12 +969,16 @@ function renderMonthSummary(barber, y, m){
   const canceled = monthAppts.filter(a=>a.status==='cancelado');
   const revenue = confirmed.reduce((sum,a)=>sum+a.servicePrice,0);
   const monthLabel = capFirst(new Date(y,m,1).toLocaleDateString('pt-BR',{month:'long', year:'numeric'}));
+  const revealed = !!state.showMonthRevenue;
   return `
     <div class="card">
       <div class="name" style="margin-bottom:10px">Resumo de ${monthLabel}</div>
-      <div class="row" style="margin-bottom:6px"><div class="grow sub">Agendamentos confirmados</div><div class="name">${confirmed.length}</div></div>
-      <div class="row" style="margin-bottom:6px"><div class="grow sub">Cancelados</div><div class="name">${canceled.length}</div></div>
-      <div class="row"><div class="grow sub">Faturamento (confirmados)</div><div class="name" style="color:var(--gold)">R$ ${revenue.toFixed(2)}</div></div>
+      <div class="row" style="margin-bottom:6px"><div class="grow sub">Agendamentos confirmados</div><div class="sub" style="font-weight:600">${confirmed.length}</div></div>
+      <div class="row" style="margin-bottom:6px"><div class="grow sub">Cancelados</div><div class="sub" style="font-weight:600">${canceled.length}</div></div>
+      <div class="row" style="cursor:pointer" onclick="state.showMonthRevenue=!state.showMonthRevenue;render()">
+        <div class="grow sub">Faturamento (confirmados) <span class="sub" style="font-size:10px">· toque para ${revealed?'ocultar':'ver'}</span></div>
+        <div class="sub" style="font-weight:600;color:var(--gold);letter-spacing:${revealed?'normal':'2px'}">${revealed ? 'R$ '+revenue.toFixed(2) : '••••••'}</div>
+      </div>
     </div>`;
 }
 function renderYearSummary(barber, y){
@@ -1081,10 +1090,12 @@ function shiftBarberMonth(delta){
   if(m<0){ m=11; y--; }
   if(m>11){ m=0; y++; }
   state.barberCalMonth = {y,m};
+  state.showMonthRevenue = false;
   render();
 }
 function setBarberDate(d){
   state.barberDate = d;
+  state.showBlockForm = false;
   const sd = new Date(d+'T00:00:00');
   state.barberCalMonth = {y:sd.getFullYear(), m:sd.getMonth()};
   render();
@@ -1237,6 +1248,14 @@ function renderConfigTab(barber){
       </div>
     </div>`;
   }).join('');
+  const recurringBlocks = barber.recurringBlocks || [];
+  let recurringHtml = recurringBlocks.length ? recurringBlocks.map(b=>`
+    <div class="row" style="margin-bottom:8px">
+      <div class="grow sub">${b.days.map(i=>dayLabels[i]).join(', ')} · ${minToLabel(b.start)}–${minToLabel(b.end)} · ${esc(b.label)}</div>
+      <button class="btn btn-sm btn-red" onclick="removeRecurringBlock('${barber.id}','${b.id}')">Remover</button>
+    </div>`).join('') : '<div class="sub" style="margin-bottom:8px">Nenhum bloqueio fixo cadastrado.</div>';
+  const showRecurForm = !!state.showRecurringBlockForm;
+  const recurChips = dayLabels.map((l,i)=>`<div class="daychip ${recurBlockSelectedDays.includes(i)?'on':''}" id="recurDay${i}" onclick="toggleRecurDay(${i})">${l}</div>`).join('');
   return `
     <h1 class="page">Configurações</h1>
     <label class="field-label">Nome</label>
@@ -1249,7 +1268,54 @@ function renderConfigTab(barber){
     <div class="sub" style="margin-bottom:10px">Crie grupos diferentes para dias com horários distintos — ex: Ter a Qui um horário, Sex e Sáb outro. Cada dia só pode estar em um grupo.</div>
     ${groupsHtml}
     <button class="btn btn-outline" style="margin-bottom:16px" onclick="addScheduleGroup()">+ Adicionar dias e horário</button>
+    <label class="field-label" style="margin-top:8px">Bloqueios fixos</label>
+    <div class="sub" style="margin-bottom:10px">Pausas que se repetem toda semana, como o almoço — valem para sempre, sem precisar renovar.</div>
+    ${recurringHtml}
+    ${showRecurForm ? `
+      <label class="field-label" style="margin-top:6px">Em quais dias</label>
+      <div class="dayrow">${recurChips}</div>
+      <div class="grid2">
+        <div><label class="field-label">De</label><input id="recurStart" placeholder="12:00"></div>
+        <div><label class="field-label">Até</label><input id="recurEnd" placeholder="13:00"></div>
+      </div>
+      <input id="recurLabel" placeholder="Motivo (ex: Almoço)">
+      <div class="flexbtns" style="margin-top:10px;margin-bottom:16px">
+        <button class="btn btn-sm btn-gold" onclick="addRecurringBlock('${barber.id}')">Salvar bloqueio fixo</button>
+        <button class="btn btn-sm btn-outline" onclick="recurBlockSelectedDays=[];state.showRecurringBlockForm=false;render()">Cancelar</button>
+      </div>
+    ` : `
+      <button class="btn btn-outline" style="margin-bottom:16px" onclick="state.showRecurringBlockForm=true;render()">+ Novo bloqueio fixo</button>
+    `}
     <div class="banner">As notificações de WhatsApp são links que abrem já com a mensagem pronta — grátis, mas exigem um toque em "enviar" no seu celular.</div>`;
+}
+let recurBlockSelectedDays = [];
+function toggleRecurDay(i){
+  const el = document.getElementById('recurDay'+i);
+  if(!el) return;
+  const idx = recurBlockSelectedDays.indexOf(i);
+  if(idx>=0){ recurBlockSelectedDays.splice(idx,1); el.classList.remove('on'); }
+  else { recurBlockSelectedDays.push(i); el.classList.add('on'); }
+}
+async function addRecurringBlock(barberId){
+  const barber = db.barbers.find(b=>b.id===barberId);
+  const s = parseHHMM(document.getElementById('recurStart').value);
+  const e = parseHHMM(document.getElementById('recurEnd').value);
+  const label = (document.getElementById('recurLabel').value||'Bloqueado').trim();
+  if(s==null||e==null||e<=s){ alert('Informe horários válidos, ex: 12:00'); return; }
+  if(!recurBlockSelectedDays.length){ alert('Selecione ao menos um dia da semana.'); return; }
+  if(!barber.recurringBlocks) barber.recurringBlocks = [];
+  barber.recurringBlocks.push({id:uid(), days:recurBlockSelectedDays.slice(), start:s, end:e, label});
+  recurBlockSelectedDays = [];
+  state.showRecurringBlockForm = false;
+  await saveDB();
+  render();
+}
+async function removeRecurringBlock(barberId, id){
+  if(!confirm('Remover este bloqueio fixo? Ele deixará de valer em todas as semanas.')) return;
+  const barber = db.barbers.find(b=>b.id===barberId);
+  barber.recurringBlocks = (barber.recurringBlocks||[]).filter(b=>b.id!==id);
+  await saveDB();
+  render();
 }
 async function updateBarber(field, val){
   const barber = db.barbers.find(b=>b.id===state.barberSession);
