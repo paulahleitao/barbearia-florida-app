@@ -147,7 +147,8 @@ function defaultDB(){
     ],
     appointments:[],
     blocks:[],
-    dayOverrides:{}
+    dayOverrides:{},
+    monthlyClients:[]
   };
 }
 
@@ -169,6 +170,7 @@ async function loadDB(){
   if(!db.appointments) db.appointments = [];
   if(!db.blocks) db.blocks = [];
   if(!db.dayOverrides) db.dayOverrides = {};
+  if(!db.monthlyClients) db.monthlyClients = [];
   let migrated = false;
   if(db.barbers[0] && db.barbers[0].name==='Barbeiro 1'){ db.barbers[0].name='Junior'; migrated=true; }
   if(db.barbers[1] && db.barbers[1].name==='Barbeiro 2'){ db.barbers[1].name='Yuri'; migrated=true; }
@@ -253,11 +255,11 @@ function getEffectiveHours(barberId, dateStr){
   if(!group) return null;
   return {start:group.start, end:group.end};
 }
-function getSlots(barberId, dateStr, duration, step, extraBusy){
-  step = step || 15;
+function getSlots(barberId, dateStr, duration, step, extraBusy, excludeApptId){
+  step = step || 30;
   const hours = getEffectiveHours(barberId, dateStr);
   if(!hours) return [];
-  const dayAppts = db.appointments.filter(a=>a.barberId===barberId && a.date===dateStr && a.status!=='cancelado');
+  const dayAppts = db.appointments.filter(a=>a.barberId===barberId && a.date===dateStr && a.status!=='cancelado' && a.id!==excludeApptId);
   const dayBlocks = db.blocks.filter(b=>b.barberId===barberId && b.date===dateStr);
   const busy = dayAppts.concat(dayBlocks).concat(extraBusy||[]);
   const slots=[];
@@ -295,6 +297,8 @@ function viewFor(view){
     case 'barberLogin': return renderBarberLogin();
     case 'barberDashboard': return renderBarberDashboard();
     case 'barberNewAppt': return renderBarberNewAppt();
+    case 'barberEditAppt': return renderBarberEditAppt();
+    case 'barberMensalForm': return renderMensalForm();
     default: return renderHome();
   }
 }
@@ -766,6 +770,7 @@ function renderBarberDashboard(){
   const tab = state.barberTab || 'agenda';
   let body = '';
   if(tab==='agenda') body = renderAgendaTab(barber);
+  if(tab==='mensais') body = renderMensaisTab(barber);
   if(tab==='servicos') body = renderServicosTab(barber);
   if(tab==='config') body = renderConfigTab(barber);
   return `
@@ -776,6 +781,7 @@ function renderBarberDashboard(){
     <div class="content">${body}</div>
     <div class="tabbar">
       <div class="tab ${tab==='agenda'?'active':''}" onclick="setBarberTab('agenda')">Agenda</div>
+      <div class="tab ${tab==='mensais'?'active':''}" onclick="setBarberTab('mensais')">Mensais</div>
       <div class="tab ${tab==='servicos'?'active':''}" onclick="setBarberTab('servicos')">Serviços</div>
       <div class="tab ${tab==='config'?'active':''}" onclick="setBarberTab('config')">Config.</div>
     </div>`;
@@ -912,14 +918,17 @@ function renderAgendaTab(barber){
           <div class="name">${esc(a.clientName)}</div>
           <div class="sub">${esc(a.serviceName)} · R$ ${a.servicePrice.toFixed(2)} <span class="pill">${a.source==='barbeiro'?'agendado por você':'cliente'}</span></div>
         </div>
-        <div class="price-tag" style="background:${a.status==='cancelado'?'var(--lead)':'#3C8C4A'}">${a.status==='cancelado'?'cancelado':'confirmado'}</div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+          <div class="price-tag" style="background:${a.status==='cancelado'?'var(--lead)':'#3C8C4A'}">${a.status==='cancelado'?'cancelado':'confirmado'}</div>
+          <button class="btn btn-sm btn-outline" style="flex:none;padding:3px 10px;font-size:10px" onclick="deleteAppt('${a.id}')">Excluir</button>
+        </div>
       </div>
       <div class="flexbtns">
         ${a.status!=='cancelado' ? `
         <button class="btn btn-sm btn-steel" onclick="openWhats('${a.clientPhone}','Olá ${esc(a.clientName)}! Lembrete: seu horário de ${esc(a.serviceName)} é dia ${prettyDate(a.date)} às ${minToLabel(a.start)}. Até lá!')">Lembrete WhatsApp</button>
         <a class="btn btn-sm btn-outline" style="text-decoration:none" href="${makeGCalUrl(a.date, a.start, a.end-a.start, a.serviceName+' - '+a.clientName, 'Cliente: '+a.clientName+' · Valor R$ '+a.servicePrice.toFixed(2))}">📅 Agenda</a>
         <button class="btn btn-sm btn-red" onclick="cancelAppt('${a.id}')">Cancelar</button>` : ''}
-        <button class="btn btn-sm btn-outline" onclick="deleteAppt('${a.id}')">Excluir</button>
+        <button class="btn btn-sm btn-steel" onclick="editAppt('${a.id}')">Editar</button>
       </div>
     </div>`).join('') : '<div class="empty">Nenhum agendamento neste dia.</div>';
 
@@ -1088,6 +1097,85 @@ async function deleteAppt(id){
   render();
 }
 
+function editAppt(id){
+  const a = db.appointments.find(x=>x.id===id);
+  if(!a) return;
+  state.editAppt = {
+    id:a.id, date:a.date, serviceId:a.serviceId, slot:a.start,
+    duration:a.end-a.start, price:a.servicePrice,
+    clientName:a.clientName, clientPhone:a.clientPhone
+  };
+  go('barberEditAppt');
+}
+
+function renderBarberEditAppt(){
+  const barber = db.barbers.find(b=>b.id===state.barberSession);
+  const draft = state.editAppt;
+  if(!draft){ return renderBarberDashboard(); }
+  const serviceOpts = db.services.map(s=>`<option value="${s.id}" ${draft.serviceId===s.id?'selected':''}>${esc(s.name)} — ${s.duration}min — R$${s.price}</option>`).join('');
+  const freeSlots = getSlots(barber.id, draft.date, draft.duration, 30, null, draft.id);
+  const slotList = (draft.slot!=null && !freeSlots.includes(draft.slot)) ? freeSlots.concat([draft.slot]) : freeSlots;
+  slotList.sort((a,b)=>a-b);
+  const slotHtml = slotList.length
+    ? '<div class="slotgrid">'+slotList.map(m=>`<div class="slotbtn ${draft.slot===m?'active':''}" onclick="pickEditSlot(${m})">${minToLabel(m)}</div>`).join('')+'</div>'
+    : '<div class="empty">Sem horários livres nesse dia.</div>';
+  let strip='';
+  for(let i=0;i<14;i++){
+    const d0 = addDaysStr(todayStr(), i);
+    const dd = new Date(d0+'T00:00:00');
+    strip += `<div class="datebtn ${draft.date===d0?'active':''}" onclick="pickEditDate('${d0}')">${dd.toLocaleDateString('pt-BR',{weekday:'short'})}<b>${pad(dd.getDate())}</b></div>`;
+  }
+  return `
+    <div class="topbar"><button class="link-btn" onclick="state.editAppt=null;go('barberDashboard')">‹ Voltar</button></div>
+    <div class="content">
+      <h1 class="page">Editar agendamento</h1>
+      <label class="field-label">Cliente</label>
+      <input value="${esc(draft.clientName||'')}" onchange="state.editAppt.clientName=this.value">
+      <label class="field-label">WhatsApp do cliente</label>
+      <input value="${esc(draft.clientPhone||'')}" onchange="state.editAppt.clientPhone=this.value">
+      <label class="field-label">Serviço</label>
+      <select onchange="pickEditService(this.value)">${serviceOpts}</select>
+      <div class="grid2">
+        <div><label class="field-label">Duração (min)</label><input type="number" value="${draft.duration}" onchange="state.editAppt.duration=parseInt(this.value)||draft.duration;state.editAppt.slot=null;render()"></div>
+        <div><label class="field-label">Valor (R$)</label><input type="number" value="${draft.price}" onchange="state.editAppt.price=parseFloat(this.value)||0"></div>
+      </div>
+      <label class="field-label">Data</label>
+      <div class="datestrip">${strip}</div>
+      ${slotHtml}
+      <button class="btn btn-gold" style="margin-top:16px" onclick="submitEditAppt()">Salvar alterações</button>
+    </div>`;
+}
+function pickEditDate(d){ state.editAppt.date=d; state.editAppt.slot=null; render(); }
+function pickEditService(sid){
+  const s = db.services.find(x=>x.id===sid);
+  state.editAppt.serviceId = sid;
+  if(s){ state.editAppt.duration = s.duration; state.editAppt.price = s.price; }
+  state.editAppt.slot = null;
+  render();
+}
+function pickEditSlot(m){ state.editAppt.slot = m; render(); }
+async function submitEditAppt(){
+  const draft = state.editAppt;
+  const a = db.appointments.find(x=>x.id===draft.id);
+  if(!a) return;
+  if(draft.slot==null){ alert('Selecione um horário.'); return; }
+  const barber = db.barbers.find(b=>b.id===a.barberId);
+  const stillFree = getSlots(barber.id, draft.date, draft.duration, 30, null, draft.id).includes(draft.slot);
+  if(!stillFree){ alert('Esse horário não está disponível.'); render(); return; }
+  const service = db.services.find(s=>s.id===draft.serviceId);
+  a.serviceId = draft.serviceId || a.serviceId;
+  a.serviceName = service ? service.name : a.serviceName;
+  a.servicePrice = draft.price;
+  a.clientName = draft.clientName;
+  a.clientPhone = draft.clientPhone;
+  a.date = draft.date;
+  a.start = draft.slot;
+  a.end = draft.slot + draft.duration;
+  await saveDB();
+  state.editAppt = null;
+  go('barberDashboard');
+}
+
 function renderServicosTab(barber){
   let rows = db.services.map(s=>`
     <div class="card service-edit">
@@ -1197,6 +1285,133 @@ async function removeScheduleGroup(groupId){
   render();
 }
 
+/* ---------------- CLIENTES MENSAIS ---------------- */
+function renderMensaisTab(barber){
+  const clients = db.monthlyClients.filter(c=>c.barberId===barber.id);
+  const dayLabels = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  let rows = clients.length ? clients.map(c=>{
+    const service = db.services.find(s=>s.id===c.serviceId);
+    return `
+    <div class="card">
+      <div class="name">${esc(c.name)}</div>
+      <div class="sub" style="margin-bottom:6px">${c.phone?esc(c.phone)+' · ':''}${dayLabels[c.dow]} às ${minToLabel(c.start)} · ${service?esc(service.name):'serviço removido'}</div>
+      <div class="row" style="margin-bottom:10px"><div class="grow sub">Valor mensal</div><div class="name" style="color:var(--gold)">R$ ${(c.monthlyValue||0).toFixed(2)}</div></div>
+      <div class="flexbtns">
+        <button class="btn btn-sm btn-steel" onclick="generateMensalAppointments('${c.id}')">Gerar agendamentos</button>
+        <button class="btn btn-sm btn-outline" onclick="editMensalClient('${c.id}')">Editar</button>
+        <button class="btn btn-sm btn-red" onclick="deleteMensalClient('${c.id}')">Remover</button>
+      </div>
+    </div>`;
+  }).join('') : '<div class="empty">Nenhum cliente mensal cadastrado.</div>';
+  return `
+    <h1 class="page">Clientes mensais</h1>
+    <div class="sub" style="margin-bottom:12px">Cadastre aqui clientes que pagam um valor fixo por mês mas cortam toda semana. Ao clicar em "Gerar agendamentos", criamos o horário semanal na agenda — apenas o primeiro atendimento de cada mês entra com o valor cheio, os demais da mesma semana/mês ficam com R$ 0 (já incluso no mensal).</div>
+    <button class="btn btn-gold" style="margin-bottom:16px" onclick="addMensalClient()">+ Novo cliente mensal</button>
+    ${rows}`;
+}
+function newMensalDraft(barberId){
+  return {barberId, name:'', phone:'', monthlyValue:'', serviceId:(db.services[0]||{}).id||'', dow:2, start:540, weeks:8};
+}
+function addMensalClient(){
+  state.mensalDraft = newMensalDraft(state.barberSession);
+  go('barberMensalForm');
+}
+function editMensalClient(id){
+  const c = db.monthlyClients.find(x=>x.id===id);
+  if(!c) return;
+  state.mensalDraft = Object.assign({}, c);
+  go('barberMensalForm');
+}
+async function deleteMensalClient(id){
+  if(!confirm('Remover este cliente mensal? Os agendamentos já criados não serão apagados.')) return;
+  db.monthlyClients = db.monthlyClients.filter(x=>x.id!==id);
+  await saveDB();
+  render();
+}
+function renderMensalForm(){
+  const d = state.mensalDraft;
+  if(!d){ return renderBarberDashboard(); }
+  const dayLabels = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  const serviceOpts = db.services.map(s=>`<option value="${s.id}" ${d.serviceId===s.id?'selected':''}>${esc(s.name)} — ${s.duration}min</option>`).join('');
+  const dayChips = dayLabels.map((l,i)=>`<div class="daychip ${d.dow===i?'on':''}" onclick="pickMensalDow(${i})">${l}</div>`).join('');
+  return `
+    <div class="topbar"><button class="link-btn" onclick="state.mensalDraft=null;state.barberTab='mensais';go('barberDashboard')">‹ Voltar</button></div>
+    <div class="content">
+      <h1 class="page">${d.id?'Editar':'Novo'} cliente mensal</h1>
+      <label class="field-label">Nome</label>
+      <input id="mcName" value="${esc(d.name||'')}">
+      <label class="field-label">WhatsApp</label>
+      <input id="mcPhone" value="${esc(d.phone||'')}">
+      <label class="field-label">Valor mensal (R$)</label>
+      <input id="mcValue" type="number" value="${d.monthlyValue||''}">
+      <label class="field-label">Serviço (usado para calcular a duração)</label>
+      <select onchange="pickMensalService(this.value)">${serviceOpts}</select>
+      <label class="field-label" style="margin-top:8px">Dia da semana</label>
+      <div class="dayrow">${dayChips}</div>
+      <label class="field-label">Horário</label>
+      <input value="${minToLabel(d.start)}" onchange="updateMensalStart(this.value)" placeholder="09:00">
+      <label class="field-label">Gerar por quantas semanas</label>
+      <input type="number" min="1" max="52" value="${d.weeks||8}" onchange="updateMensalWeeks(this.value)">
+      <button class="btn btn-gold" style="margin-top:16px" onclick="saveMensalClient()">Salvar cliente mensal</button>
+    </div>`;
+}
+function pickMensalService(sid){ state.mensalDraft.serviceId=sid; render(); }
+function pickMensalDow(d){ state.mensalDraft.dow=d; render(); }
+function updateMensalStart(v){ const m=parseHHMM(v); if(m!=null) state.mensalDraft.start=m; }
+function updateMensalWeeks(v){ state.mensalDraft.weeks=Math.min(52,Math.max(1,parseInt(v)||8)); }
+async function saveMensalClient(){
+  const d = state.mensalDraft;
+  const name = (document.getElementById('mcName').value||'').trim();
+  const phone = (document.getElementById('mcPhone').value||'').trim();
+  const value = parseFloat(document.getElementById('mcValue').value)||0;
+  if(!name){ alert('Informe o nome do cliente.'); return; }
+  if(!d.serviceId){ alert('Selecione um serviço.'); return; }
+  if(d.id){
+    const c = db.monthlyClients.find(x=>x.id===d.id);
+    Object.assign(c, {name, phone, monthlyValue:value, serviceId:d.serviceId, dow:d.dow, start:d.start, weeks:d.weeks});
+  } else {
+    db.monthlyClients.push({id:uid(), barberId:d.barberId, name, phone, monthlyValue:value, serviceId:d.serviceId, dow:d.dow, start:d.start, weeks:d.weeks, createdAt:Date.now()});
+  }
+  await saveDB();
+  state.mensalDraft = null;
+  state.barberTab = 'mensais';
+  go('barberDashboard');
+}
+async function generateMensalAppointments(clientId){
+  const c = db.monthlyClients.find(x=>x.id===clientId);
+  if(!c) return;
+  const barber = db.barbers.find(b=>b.id===c.barberId) || db.barbers.find(b=>b.id===state.barberSession);
+  const service = db.services.find(s=>s.id===c.serviceId);
+  if(!service){ alert('Selecione um serviço válido para este cliente antes de gerar os agendamentos.'); return; }
+  let firstDate = todayStr();
+  const diff = (c.dow - dow(firstDate) + 7) % 7;
+  firstDate = addDaysStr(firstDate, diff);
+  const groupId = uid();
+  const weeks = Math.min(52, Math.max(1, c.weeks||8));
+  const monthsSeen = {};
+  let skipped = [];
+  let created = 0;
+  for(let i=0;i<weeks;i++){
+    const dateStr = addDaysStr(firstDate, 7*i);
+    const monthKey = dateStr.slice(0,7);
+    const free = getSlots(barber.id, dateStr, service.duration, 30).includes(c.start);
+    if(!free){ skipped.push(prettyDate(dateStr)); continue; }
+    const isFirstOfMonth = !monthsSeen[monthKey];
+    monthsSeen[monthKey] = true;
+    db.appointments.push({
+      id:uid(), groupId, monthlyClientId:c.id, barberId:barber.id, serviceId:service.id,
+      serviceName:(isFirstOfMonth ? 'Mensal - ' : 'Mensal (incluso) - ')+service.name,
+      servicePrice: isFirstOfMonth ? (c.monthlyValue||0) : 0,
+      clientName:c.name, clientPhone:c.phone, date:dateStr, start:c.start, end:c.start+service.duration,
+      status:'confirmado', source:'barbeiro', recurring:true, createdAt:Date.now()
+    });
+    created++;
+  }
+  await saveDB();
+  render();
+  alert(`Agendamentos gerados: ${created}.`+(skipped.length ? (' Semanas puladas (horário ocupado): '+skipped.join(', ')) : ''));
+}
+
 /* ---------------- BARBER MANUAL BOOKING ---------------- */
 function renderBarberNewAppt(){
   const barber = db.barbers.find(b=>b.id===state.barberSession);
@@ -1205,7 +1420,7 @@ function renderBarberNewAppt(){
   let slotHtml = '';
   if(draft.serviceId){
     const service = db.services.find(s=>s.id===draft.serviceId);
-    const slots = getSlots(barber.id, draft.date, service.duration);
+    const slots = getSlots(barber.id, draft.date, service.duration, 30);
     slotHtml = slots.length
       ? '<div class="slotgrid">'+slots.map(m=>`<div class="slotbtn ${draft.slot===m?'active':''}" onclick="pickManualSlot(${m})">${minToLabel(m)}</div>`).join('')+'</div>'
       : '<div class="empty">Sem horários livres nesse dia.</div>';
@@ -1231,11 +1446,18 @@ function renderBarberNewAppt(){
       ${slotHtml}
       ${(draft.serviceId && draft.slot!=null) ? `
       <div class="card" style="margin-top:14px">
-        <div class="checkrow">
-          <input type="checkbox" id="manRepeat" ${draft.repeatMonthly?'checked':''} onchange="state.newAppt.repeatMonthly=this.checked;render()">
-          <label for="manRepeat" style="margin:0">Repetir mensalmente (mesmo dia e horário)</label>
-        </div>
-        ${draft.repeatMonthly ? `
+        <label class="field-label" style="margin:0 0 8px">Repetição</label>
+        <select onchange="state.newAppt.repeatType=this.value;render()">
+          <option value="none" ${(!draft.repeatType||draft.repeatType==='none')?'selected':''}>Não repetir</option>
+          <option value="weekly" ${draft.repeatType==='weekly'?'selected':''}>Repetir semanalmente (ex: cliente mensal)</option>
+          <option value="monthly" ${draft.repeatType==='monthly'?'selected':''}>Repetir mensalmente (mesmo dia do mês)</option>
+        </select>
+        ${draft.repeatType==='weekly' ? `
+        <label class="field-label" style="margin-top:10px">Repetir por quantas semanas</label>
+        <input type="number" min="1" max="52" value="${draft.repeatWeeks||8}" onchange="state.newAppt.repeatWeeks=parseInt(this.value)||1">
+        <div class="sub">Vamos criar o mesmo horário toda semana. Se alguma semana já estiver ocupada, avisamos e pulamos ela.</div>
+        ` : ''}
+        ${draft.repeatType==='monthly' ? `
         <label class="field-label" style="margin-top:10px">Repetir por quantos meses</label>
         <input type="number" min="1" max="12" value="${draft.repeatMonths||3}" onchange="state.newAppt.repeatMonths=parseInt(this.value)||1">
         <div class="sub">Vamos tentar criar o mesmo horário nos próximos meses. Se algum mês já estiver ocupado nesse horário, avisamos e pulamos ele.</div>
@@ -1265,9 +1487,10 @@ async function submitManualBooking(){
   const phone = (document.getElementById('manPhone').value||'').trim();
   if(!name){ alert('Informe o nome do cliente.'); return; }
   const service = db.services.find(s=>s.id===d.serviceId);
-  const stillFree = getSlots(barber.id, d.date, service.duration).includes(d.slot);
+  const stillFree = getSlots(barber.id, d.date, service.duration, 30).includes(d.slot);
   if(!stillFree){ alert('Esse horário acabou de ser ocupado.'); render(); return; }
-  const groupId = d.repeatMonthly ? uid() : null;
+  const repeatType = d.repeatType || 'none';
+  const groupId = repeatType!=='none' ? uid() : null;
   const appt = {
     id: uid(), groupId, barberId:barber.id, serviceId:service.id, serviceName:service.name, servicePrice:service.price,
     clientName:name, clientPhone:phone, date:d.date, start:d.slot, end:d.slot+service.duration,
@@ -1275,11 +1498,26 @@ async function submitManualBooking(){
   };
   db.appointments.push(appt);
   let skipped = [];
-  if(d.repeatMonthly){
+  if(repeatType==='weekly'){
+    const weeks = Math.min(52, Math.max(1, d.repeatWeeks||8));
+    for(let i=1;i<=weeks;i++){
+      const futureDate = addDaysStr(d.date, 7*i);
+      const free = getSlots(barber.id, futureDate, service.duration, 30).includes(d.slot);
+      if(free){
+        db.appointments.push({
+          id: uid(), groupId, barberId:barber.id, serviceId:service.id, serviceName:service.name, servicePrice:service.price,
+          clientName:name, clientPhone:phone, date:futureDate, start:d.slot, end:d.slot+service.duration,
+          status:'confirmado', source:'barbeiro', recurring:true, createdAt:Date.now()
+        });
+      } else {
+        skipped.push(prettyDate(futureDate));
+      }
+    }
+  } else if(repeatType==='monthly'){
     const months = Math.min(12, Math.max(1, d.repeatMonths||3));
     for(let i=1;i<=months;i++){
       const futureDate = addMonthsStr(d.date, i);
-      const free = getSlots(barber.id, futureDate, service.duration).includes(d.slot);
+      const free = getSlots(barber.id, futureDate, service.duration, 30).includes(d.slot);
       if(free){
         db.appointments.push({
           id: uid(), groupId, barberId:barber.id, serviceId:service.id, serviceName:service.name, servicePrice:service.price,
