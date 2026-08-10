@@ -822,20 +822,14 @@ function renderDayAdjust(barber, date){
 
   const dayLabels = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
   const d = dow(date);
-  const recurringToday = (barber.recurringBlocks||[]).filter(rb=>rb.days.includes(d));
-  const dayBlocks = db.blocks.filter(b=>b.barberId===barber.id && b.date===date);
-  const hasAnyBlock = recurringToday.length || dayBlocks.length;
-  let blockList = hasAnyBlock ? (
-    recurringToday.map(b=>`
+  const recurringToday = (barber.recurringBlocks||[]).filter(rb=>rb.days.includes(d)).map(rb=>Object.assign({}, rb, {fixed:true}));
+  const dayBlocks = db.blocks.filter(b=>b.barberId===barber.id && b.date===date).map(b=>Object.assign({}, b, {fixed:false}));
+  const allBlocks = recurringToday.concat(dayBlocks).sort((a,b)=>a.start-b.start);
+  let blockList = allBlocks.length ? allBlocks.map(b=>`
     <div class="row" style="margin-bottom:8px">
-      <div class="grow sub">${minToLabel(b.start)}–${minToLabel(b.end)} · ${esc(b.label)} <span class="pill">fixo, toda ${dayLabels[d]}</span></div>
-    </div>`).join('')
-    + dayBlocks.map(b=>`
-    <div class="row" style="margin-bottom:8px">
-      <div class="grow sub">${minToLabel(b.start)}–${minToLabel(b.end)} · ${esc(b.label)}</div>
-      <button class="btn btn-sm btn-red" onclick="removeBlock('${b.id}')">Remover</button>
-    </div>`).join('')
-  ) : '<div class="sub" style="margin-bottom:8px">Nenhum bloqueio nesse dia.</div>';
+      <div class="grow sub">${minToLabel(b.start)}–${minToLabel(b.end)} · ${esc(b.label)} · ${b.fixed?'fixo':'só nesse dia'}</div>
+      <button class="btn btn-sm btn-red" onclick="${b.fixed ? `removeRecurringBlock('${barber.id}','${b.id}')` : `removeBlock('${b.id}')`}">Remover</button>
+    </div>`).join('') : '<div class="sub" style="margin-bottom:8px">Nenhum bloqueio nesse dia.</div>';
 
   const isEffectivelyOpen = !!getEffectiveHours(barber.id, date);
   const showForm = !!state.showBlockForm;
@@ -855,7 +849,7 @@ function renderDayAdjust(barber, date){
     ${isEffectivelyOpen ? `
     <div class="card">
       <div class="name" style="margin-bottom:4px">Bloqueios de horário</div>
-      <div class="sub" style="margin-bottom:10px">Pausas nesse dia específico. Para uma pausa fixa toda semana (ex: almoço), cadastre em Config. → Bloqueios fixos.</div>
+      <div class="sub" style="margin-bottom:10px">Horários indisponíveis nesse dia.</div>
       ${blockList}
       ${showForm ? `
         <div class="grid2">
