@@ -183,6 +183,9 @@ async function loadDB(){
       migrated=true;
     }
   });
+  (db.services||[]).forEach(s=>{
+    if(s.name && s.name.trim().toLowerCase()==='luzes' && s.duration===30){ s.duration=60; migrated=true; }
+  });
   if(migrated) saveDB();
 }
 
@@ -345,7 +348,15 @@ function steps(activeIdx, total){
 function renderClientService(){
   const c = state.client;
   if(!c.serviceQty) c.serviceQty = {};
-  const orderedServices = db.services.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt-BR'));
+  const orderedServices = db.services.slice().sort((a,b)=>{
+    const aSimples = (a.name||'').trim().toLowerCase()==='corte simples';
+    const bSimples = (b.name||'').trim().toLowerCase()==='corte simples';
+    const aLateral = (a.name||'').toLowerCase().includes('lateral');
+    const bLateral = (b.name||'').toLowerCase().includes('lateral');
+    if(aSimples && bLateral) return -1;
+    if(bSimples && aLateral) return 1;
+    return a.name.localeCompare(b.name,'pt-BR');
+  });
   let cards = orderedServices.map(s=>{
     const qty = c.serviceQty[s.id]||0;
     return `
@@ -926,7 +937,6 @@ function renderAgendaTab(barber){
       <div class="flexbtns">
         ${a.status!=='cancelado' ? `
         <button class="btn btn-sm btn-steel" onclick="openWhats('${a.clientPhone}','Olá ${esc(a.clientName)}! Lembrete: seu horário de ${esc(a.serviceName)} é dia ${prettyDate(a.date)} às ${minToLabel(a.start)}. Até lá!')">Lembrete WhatsApp</button>
-        <a class="btn btn-sm btn-outline" style="text-decoration:none" href="${makeGCalUrl(a.date, a.start, a.end-a.start, a.serviceName+' - '+a.clientName, 'Cliente: '+a.clientName+' · Valor R$ '+a.servicePrice.toFixed(2))}">📅 Agenda</a>
         <button class="btn btn-sm btn-red" onclick="cancelAppt('${a.id}')">Cancelar</button>` : ''}
         <button class="btn btn-sm btn-steel" onclick="editAppt('${a.id}')">Editar</button>
       </div>
