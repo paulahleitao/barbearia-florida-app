@@ -972,7 +972,7 @@ function renderAgendaTab(barber){
         <div class="grow">
           <div class="appt-time">${minToLabel(a.start)}–${minToLabel(a.end)}</div>
           <div class="name">${esc(a.clientName)}</div>
-          <div class="sub">${esc(a.serviceName)} · R$ ${a.servicePrice.toFixed(2)} <span class="pill">${a.source==='barbeiro'?'agendado por você':'cliente'}</span></div>
+          <div class="sub">${esc(a.serviceName)} · R$ ${a.servicePrice.toFixed(2)} <span class="pill">${a.source==='barbeiro'?'agendado por você':'cliente'}</span>${a.overlap?' <span class="pill" style="background:var(--gold);color:var(--gold-ink)">encaixe</span>':''}</div>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
           <div class="price-tag" style="background:${a.status==='cancelado'?'var(--lead)':'#3C8C4A'}">${a.status==='cancelado'?'cancelado':'confirmado'}</div>
@@ -1561,12 +1561,27 @@ function renderBarberNewAppt(){
   const draft = state.newAppt;
   const serviceOpts = db.services.map(s=>`<option value="${s.id}" ${draft.serviceId===s.id?'selected':''}>${esc(s.name)} — ${s.duration}min — R$${s.price}</option>`).join('');
   let slotHtml = '';
+  let encaixeHtml = '';
   if(draft.serviceId){
     const service = db.services.find(s=>s.id===draft.serviceId);
     const slots = getSlots(barber.id, draft.date, service.duration, 30);
     slotHtml = slots.length
-      ? '<div class="slotgrid">'+slots.map(m=>`<div class="slotbtn ${draft.slot===m?'active':''}" onclick="pickManualSlot(${m})">${minToLabel(m)}</div>`).join('')+'</div>'
+      ? '<div class="slotgrid">'+slots.map(m=>`<div class="slotbtn ${draft.slot===m && !draft.forceOverlap?'active':''}" onclick="pickManualSlot(${m})">${minToLabel(m)}</div>`).join('')+'</div>'
       : '<div class="empty">Sem horários livres nesse dia.</div>';
+    /* Encaixe: permite registrar um atendimento em qualquer horário, mesmo que já haja
+       outro agendamento nele — útil quando um corte termina mais rápido e dá pra encaixar
+       outro serviço dentro dos mesmos 30 minutos. */
+    const showForm = !!draft.showCustomTime;
+    encaixeHtml = `
+      <div style="margin-top:10px">
+        <button type="button" class="btn btn-sm btn-outline" onclick="state.newAppt.showCustomTime=${!showForm};render()">${showForm?'Cancelar encaixe':'+ Encaixar em outro horário (mesmo ocupado)'}</button>
+        ${showForm ? `
+          <div class="sub" style="margin:8px 0 4px">Use quando o atendimento anterior acabou mais rápido e dá pra encaixar esse aqui no meio do horário — mesmo que já tenha outro agendamento nesse intervalo.</div>
+          <input id="manCustomTime" placeholder="ex: 14:15" inputmode="numeric" oninput="maskTimeInput(this)" value="${draft.customTimeText||''}">
+          <button class="btn btn-sm btn-steel" style="margin-top:6px" onclick="pickManualCustomSlot()">Usar esse horário</button>
+        ` : ''}
+        ${(draft.forceOverlap && draft.slot!=null) ? `<div class="sub" style="margin-top:8px;color:var(--gold)">Encaixe selecionado: ${minToLabel(draft.slot)}–${minToLabel(draft.slot+service.duration)} (pode se sobrepor a outro agendamento)</div>` : ''}
+      </div>`;
   }
   let strip='';
   for(let i=0;i<14;i++){
@@ -1587,6 +1602,7 @@ function renderBarberNewAppt(){
       <label class="field-label">Data</label>
       <div class="datestrip">${strip}</div>
       ${slotHtml}
+      ${encaixeHtml}
       ${(draft.serviceId && draft.slot!=null) ? `
       <div class="card" style="margin-top:14px">
         <label class="field-label" style="margin:0 0 8px">Repetição</label>
@@ -1610,8 +1626,18 @@ function renderBarberNewAppt(){
     </div>`;
 }
 function pickManualDate(d){ state.newAppt = Object.assign({date:todayStr()}, state.newAppt, {date:d}); render(); }
-function pickManualService(sid){ state.newAppt = Object.assign({date:todayStr()}, state.newAppt, {serviceId:sid, slot:null}); render(); }
-function pickManualSlot(m){ state.newAppt.slot = m; render(); }
+function pickManualService(sid){ state.newAppt = Object.assign({date:todayStr()}, state.newAppt, {serviceId:sid, slot:null, forceOverlap:false, showCustomTime:false}); render(); }
+function pickManualSlot(m){ state.newAppt.slot = m; state.newAppt.forceOverlap = false; render(); }
+function pickManualCustomSlot(){
+  const v = document.getElementById('manCustomTime').value;
+  const m = parseHHMM(v);
+  if(m==null){ alert('Digite um horário válido, ex: 14:15'); return; }
+  state.newAppt.slot = m;
+  state.newAppt.forceOverlap = true;
+  state.newAppt.showCustomTime = false;
+  state.newAppt.customTimeText = v;
+  render();
+}
 function addMonthsStr(base, n){
   const d = new Date(base+'T00:00:00');
   const targetDay = d.getDate();
@@ -1630,14 +1656,22 @@ async function submitManualBooking(){
   const phone = (document.getElementById('manPhone').value||'').trim();
   if(!name){ alert('Informe o nome do cliente.'); return; }
   const service = db.services.find(s=>s.id===d.serviceId);
-  const stillFree = getSlots(barber.id, d.date, service.duration, 30).includes(d.slot);
-  if(!stillFree){ alert('Esse horário acabou de ser ocupado.'); render(); return; }
+  if(d.forceOverlap){
+    /* Encaixe proposital: não bloqueia por conflito de horário, só garante que está dentro do expediente do dia. */
+    const hours = getEffectiveHours(barber.id, d.date);
+    if(!hours || d.slot < hours.start || d.slot + service.duration > hours.end){
+      alert('Esse horário está fora do expediente nesse dia.'); return;
+    }
+  } else {
+    const stillFree = getSlots(barber.id, d.date, service.duration, 30).includes(d.slot);
+    if(!stillFree){ alert('Esse horário acabou de ser ocupado.'); render(); return; }
+  }
   const repeatType = d.repeatType || 'none';
   const groupId = repeatType!=='none' ? uid() : null;
   const appt = {
     id: uid(), groupId, barberId:barber.id, serviceId:service.id, serviceName:service.name, servicePrice:service.price,
     clientName:name, clientPhone:phone, date:d.date, start:d.slot, end:d.slot+service.duration,
-    status:'confirmado', source:'barbeiro', createdAt:Date.now()
+    status:'confirmado', source:'barbeiro', overlap:!!d.forceOverlap, createdAt:Date.now()
   };
   db.appointments.push(appt);
   let skipped = [];
