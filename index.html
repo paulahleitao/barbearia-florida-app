@@ -1537,13 +1537,22 @@ async function generateMensalAppointments(clientId){
   }
   await saveDB();
   render();
-  alert(`Agendamentos gerados: ${created}.`+(skipped.length ? (' Semanas puladas (horário ocupado): '+skipped.join(', ')) : ''));
+  alert(`Agendamentos gerados: ${created}.`+(skipped.length ? (' Semanas puladas: '+skipped.join(', ')) : ''));
+  if(created>0 && c.phone && confirm('Deseja avisar o cliente pelo WhatsApp sobre o agendamento mensal?')){
+    const dayLabels = ['domingo','segunda-feira','terça-feira','quarta-feira','quinta-feira','sexta-feira','sábado'];
+    /* Mensagem do mensal nunca leva valor — é combinado à parte, fora do app. */
+    const msg = `Olá ${c.name}! Aqui é o ${barber.name}. Confirmando seu corte mensal: toda ${dayLabels[c.dow]} às ${minToLabel(c.start)}. Qualquer alteração me avisa por aqui!`;
+    openWhats(c.phone, msg);
+  }
 }
 
 /* ---------------- BARBER MANUAL BOOKING ---------------- */
 function renderBarberNewAppt(){
   const barber = db.barbers.find(b=>b.id===state.barberSession);
-  const draft = state.newAppt || {date: todayStr()};
+  /* IMPORTANTE: precisa ser o mesmo objeto salvo em state.newAppt (não uma cópia solta),
+     senão o que for digitado antes de escolher data/serviço se perde na primeira troca. */
+  if(!state.newAppt) state.newAppt = {date: todayStr()};
+  const draft = state.newAppt;
   const serviceOpts = db.services.map(s=>`<option value="${s.id}" ${draft.serviceId===s.id?'selected':''}>${esc(s.name)} — ${s.duration}min — R$${s.price}</option>`).join('');
   let slotHtml = '';
   if(draft.serviceId){
