@@ -1439,8 +1439,14 @@ function editMensalClient(id){
   go('barberMensalForm');
 }
 async function deleteMensalClient(id){
-  if(!confirm('Remover este cliente mensal? Os agendamentos já criados não serão apagados.')) return;
+  const c = db.monthlyClients.find(x=>x.id===id);
+  const qtd = db.appointments.filter(a=>a.monthlyClientId===id).length;
+  const aviso = qtd>0
+    ? `Remover ${c?c.name:'este cliente mensal'}? Isso também vai excluir ${qtd} agendamento(s) dele(a) da agenda (inclusive os já passados).`
+    : 'Remover este cliente mensal?';
+  if(!confirm(aviso)) return;
   db.monthlyClients = db.monthlyClients.filter(x=>x.id!==id);
+  db.appointments = db.appointments.filter(a=>a.monthlyClientId!==id);
   await saveDB();
   render();
 }
