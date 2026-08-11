@@ -1455,11 +1455,11 @@ function renderMensalForm(){
     <div class="content">
       <h1 class="page">${d.id?'Editar':'Novo'} cliente mensal</h1>
       <label class="field-label">Nome</label>
-      <input id="mcName" value="${esc(d.name||'')}">
+      <input id="mcName" value="${esc(d.name||'')}" oninput="state.mensalDraft.name=this.value">
       <label class="field-label">WhatsApp</label>
-      <input id="mcPhone" value="${esc(d.phone||'')}">
+      <input id="mcPhone" value="${esc(d.phone||'')}" oninput="state.mensalDraft.phone=this.value">
       <label class="field-label">Valor mensal (R$)</label>
-      <input id="mcValue" type="number" value="${d.monthlyValue||''}">
+      <input id="mcValue" type="number" value="${d.monthlyValue||''}" oninput="state.mensalDraft.monthlyValue=this.value">
       <label class="field-label">Serviço (usado para calcular a duração)</label>
       <select onchange="pickMensalService(this.value)">${serviceOpts}</select>
       <label class="field-label" style="margin-top:8px">Dia da semana</label>
