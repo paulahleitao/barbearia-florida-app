@@ -300,7 +300,7 @@ function getEffectiveHours(barberId, dateStr){
   if(!group) return null;
   return {start:group.start, end:group.end};
 }
-function getSlots(barberId, dateStr, duration, step, extraBusy, excludeApptId){
+function getSlots(barberId, dateStr, duration, step, extraBusy, excludeApptId, ignorePastTime){
   step = step || 30;
   const hours = getEffectiveHours(barberId, dateStr);
   if(!hours) return [];
@@ -314,7 +314,7 @@ function getSlots(barberId, dateStr, duration, step, extraBusy, excludeApptId){
   const isToday = dateStr===todayStr();
   const now = nowMinutes();
   for(let s=hours.start; s+duration<=hours.end; s+=step){
-    if(isToday && s < now+10) continue;
+    if(isToday && !ignorePastTime && s < now+10) continue;
     const conflict = busy.some(a=> s < a.end && a.start < s+duration);
     if(!conflict) slots.push(s);
   }
@@ -1174,13 +1174,17 @@ function renderBarberEditAppt(){
   const draft = state.editAppt;
   if(!draft){ return renderBarberDashboard(); }
   const serviceOpts = db.services.map(s=>`<option value="${s.id}" ${draft.serviceId===s.id?'selected':''}>${esc(s.name)} — ${s.duration}min — R$${s.price}</option>`).join('');
-  const freeSlots = getSlots(barber.id, draft.date, draft.duration, 30, null, draft.id);
+  const freeSlots = getSlots(barber.id, draft.date, draft.duration, 30, null, draft.id, true);
   const slotList = (draft.slot!=null && !freeSlots.includes(draft.slot)) ? freeSlots.concat([draft.slot]) : freeSlots;
   slotList.sort((a,b)=>a-b);
   const slotHtml = slotList.length
     ? '<div class="slotgrid">'+slotList.map(m=>`<div class="slotbtn ${draft.slot===m?'active':''}" onclick="pickEditSlot(${m})">${minToLabel(m)}</div>`).join('')+'</div>'
     : '<div class="empty">Sem horários livres nesse dia.</div>';
   let strip='';
+  if(draft.date < todayStr()){
+    const dd0 = new Date(draft.date+'T00:00:00');
+    strip += `<div class="datebtn active" onclick="pickEditDate('${draft.date}')">${dd0.toLocaleDateString('pt-BR',{weekday:'short'})}<b>${pad(dd0.getDate())}</b></div>`;
+  }
   for(let i=0;i<14;i++){
     const d0 = addDaysStr(todayStr(), i);
     const dd = new Date(d0+'T00:00:00');
@@ -1221,7 +1225,7 @@ async function submitEditAppt(){
   if(!a) return;
   if(draft.slot==null){ alert('Selecione um horário.'); return; }
   const barber = db.barbers.find(b=>b.id===a.barberId);
-  const stillFree = getSlots(barber.id, draft.date, draft.duration, 30, null, draft.id).includes(draft.slot);
+  const stillFree = getSlots(barber.id, draft.date, draft.duration, 30, null, draft.id, true).includes(draft.slot);
   if(!stillFree){ alert('Esse horário não está disponível.'); render(); return; }
   const service = db.services.find(s=>s.id===draft.serviceId);
   a.serviceId = draft.serviceId || a.serviceId;
