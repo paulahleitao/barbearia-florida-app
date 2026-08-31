@@ -225,7 +225,7 @@ async function refreshDB(){
 }
 /* Telas em que é seguro re-renderizar sozinho ao chegar dado novo (não interrompe o barbeiro/cliente
    no meio de um formulário que ele esteja preenchendo). */
-const LIVE_REFRESH_VIEWS = new Set(['home','barberDashboard','clientMyAppts','clientLookupPhone','barberLogin']);
+const LIVE_REFRESH_VIEWS = new Set(['home','barberDashboard','clientMyAppts','clientLookupPhone']);
 function startLivePolling(){
   setInterval(async ()=>{
     await refreshDB();
