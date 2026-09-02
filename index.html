@@ -189,6 +189,8 @@ async function loadDB(){
   });
   (db.services||[]).forEach(s=>{
     if(s.name && s.name.trim().toLowerCase()==='luzes' && s.duration===30){ s.duration=60; migrated=true; }
+    const norm = (s.name||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'');
+    if(norm.includes('corte') && norm.includes('luz') && s.duration!==60){ s.duration=60; migrated=true; }
   });
   if(migrated) saveDB();
 }
@@ -229,7 +231,15 @@ const LIVE_REFRESH_VIEWS = new Set(['home','barberDashboard','clientMyAppts','cl
 function startLivePolling(){
   setInterval(async ()=>{
     await refreshDB();
-    if(LIVE_REFRESH_VIEWS.has(state.view)) render();
+    /* Na área do barbeiro, só re-renderiza sozinho na aba Agenda: as demais abas
+       (Config, Serviços, Mensais, Financeiro) têm formulários com campos de texto
+       que o barbeiro pode estar preenchendo, e um re-render no meio apagaria o
+       que ele digitou (ex: bloqueio de horário). */
+    if(state.view==='barberDashboard'){
+      if((state.barberTab||'agenda')==='agenda') render();
+    } else if(LIVE_REFRESH_VIEWS.has(state.view)){
+      render();
+    }
   }, 8000);
 }
 
