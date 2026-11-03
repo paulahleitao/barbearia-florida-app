@@ -150,6 +150,7 @@ function defaultDB(){
     appointments:[],
     blocks:[],
     dayOverrides:{},
+    monthBlocks:{},
     monthlyClients:[]
   };
 }
@@ -172,6 +173,7 @@ async function loadDB(){
   if(!db.appointments) db.appointments = [];
   if(!db.blocks) db.blocks = [];
   if(!db.dayOverrides) db.dayOverrides = {};
+  if(!db.monthBlocks || typeof db.monthBlocks!=='object') db.monthBlocks = {};
   if(!db.monthlyClients) db.monthlyClients = [];
   if(!db.expenses) db.expenses = [];
   let migrated = false;
@@ -218,6 +220,7 @@ async function refreshDB(){
       if(!db.appointments) db.appointments = [];
       if(!db.blocks) db.blocks = [];
       if(!db.dayOverrides) db.dayOverrides = {};
+      if(!db.monthBlocks || typeof db.monthBlocks!=='object') db.monthBlocks = {};
       if(!db.monthlyClients) db.monthlyClients = [];
       if(!db.expenses) db.expenses = [];
     }
@@ -227,7 +230,7 @@ async function refreshDB(){
 }
 /* Telas em que é seguro re-renderizar sozinho ao chegar dado novo (não interrompe o barbeiro/cliente
    no meio de um formulário que ele esteja preenchendo). */
-const LIVE_REFRESH_VIEWS = new Set(['home','barberDashboard','clientMyAppts','clientLookupPhone']);
+const LIVE_REFRESH_VIEWS = new Set(['home','barberDashboard','clientMyAppts','clientLookupPhone','clientDate','clientSlot']);
 function startLivePolling(){
   setInterval(async ()=>{
     await refreshDB();
@@ -300,8 +303,14 @@ function barberPoleIcon(size){
 }
 
 function dayOverrideKey(barberId, dateStr){ return barberId+'|'+dateStr; }
+function monthBlockKey(barberId, monthStr){ return barberId+'|'+monthStr; }
+function isMonthBlocked(barberId, dateStr){
+  return !!(db.monthBlocks && db.monthBlocks[monthBlockKey(barberId, dateStr.slice(0,7))]);
+}
 function getEffectiveHours(barberId, dateStr){
   const barber = db.barbers.find(b=>b.id===barberId);
+  // O bloqueio mensal prevalece sobre exceções diárias e a agenda semanal.
+  if(isMonthBlocked(barberId, dateStr)) return null;
   const override = db.dayOverrides[dayOverrideKey(barberId, dateStr)];
   if(override){
     if(override.mode==='closed') return null;
@@ -651,13 +660,15 @@ async function submitClientBooking(){
   const phone = document.getElementById('cliPhone').value.trim();
   if(!name || !phone){ alert('Preencha nome e WhatsApp.'); return; }
   const c = state.client;
+  // Recarrega a configuração mais recente para respeitar bloqueios feitos em outro aparelho.
+  await refreshDB();
   const barber = db.barbers.find(b=>b.id===c.barberId);
   // re-checa cada item (segurança contra conflito de última hora)
   for(let i=0;i<c.items.length;i++){
     const item = c.items[i];
     const stillFree = getSlots(c.barberId, item.date, item.duration, 30, extraBusyForItem(item, item.date)).includes(item.slot);
     if(!stillFree){
-      alert(`O horário de "${item.name}" (${prettyDate(item.date)} às ${minToLabel(item.slot)}) acabou de ser ocupado. Escolha outro horário para esse serviço.`);
+      alert(isMonthBlocked(c.barberId, item.date) ? `O barbeiro bloqueou o mês de ${item.date.slice(0,7)}. Não é possível concluir este agendamento. Escolha outra data.` : `O horário de "${item.name}" (${prettyDate(item.date)} às ${minToLabel(item.slot)}) não está mais disponível. Escolha outro horário para esse serviço.`);
       c.itemIndex = i;
       go('clientDate');
       return;
@@ -1554,6 +1565,38 @@ async function deleteService(id){
   render();
 }
 
+function defaultMonthToBlock(){
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth()+1);
+  return d.getFullYear()+'-'+pad(d.getMonth()+1);
+}
+async function toggleMonthBlock(barberId){
+  const input = document.getElementById('monthBlockInput');
+  const month = input ? input.value : (state.monthBlockMonth || defaultMonthToBlock());
+  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)){ alert('Selecione um mês válido.'); return; }
+  state.monthBlockMonth = month;
+  // Atualiza antes de alterar para não sobrescrever mudanças recentes feitas em outro aparelho.
+  await refreshDB();
+  if(!db.monthBlocks || typeof db.monthBlocks!=='object') db.monthBlocks = {};
+  const key = monthBlockKey(barberId, month);
+  if(db.monthBlocks[key]){
+    if(!confirm('Desbloquear este mês? A agenda semanal e as exceções já cadastradas voltarão a valer.')) return;
+    delete db.monthBlocks[key];
+    await saveDB();
+    render();
+    return;
+  }
+  const appointments = db.appointments.filter(a=>a.barberId===barberId && a.date && a.date.slice(0,7)===month && a.status!=='cancelado');
+  const warning = appointments.length
+    ? `\n\nAtenção: existem ${appointments.length} agendamento(s) neste mês. Eles serão mantidos, mas o bloqueio impedirá novos agendamentos. Será necessário tratar esses compromissos existentes separadamente.`
+    : '';
+  if(!confirm(`Bloquear o mês inteiro de ${month}? Clientes não conseguirão agendar nesse período.${warning}`)) return;
+  db.monthBlocks[key] = {blockedAt:Date.now()};
+  await saveDB();
+  render();
+}
+
 function renderConfigTab(barber){
   const dayLabels = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
   const groups = barber.scheduleGroups || [];
@@ -1619,6 +1662,16 @@ function renderConfigTab(barber){
       ` : `
         <button class="btn btn-outline" onclick="state.showRecurringBlockForm=true;render()">+ Novo bloqueio fixo</button>
       `}
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="name" style="margin-bottom:4px">🗓️ Bloqueio de mês inteiro</div>
+      <div class="sub" style="margin-bottom:10px">Feche todos os dias de um mês para novos agendamentos. Ao desbloquear, sua agenda semanal e as exceções já cadastradas voltam a valer normalmente.</div>
+      <label class="field-label">Mês</label>
+      <input id="monthBlockInput" type="month" value="${esc(state.monthBlockMonth || defaultMonthToBlock())}" onchange="state.monthBlockMonth=this.value;render()" style="margin-bottom:10px">
+      ${db.monthBlocks && db.monthBlocks[monthBlockKey(barber.id, state.monthBlockMonth || defaultMonthToBlock())]
+        ? `<div class="sub" style="margin-bottom:10px;color:var(--danger, #b33)">Este mês está bloqueado para agendamentos.</div><button class="btn btn-sm btn-steel" onclick="toggleMonthBlock('${barber.id}')">Desbloquear mês</button>`
+        : `<div class="sub" style="margin-bottom:10px">Este mês está ${db.monthBlocks && db.monthBlocks[monthBlockKey(barber.id, state.monthBlockMonth || defaultMonthToBlock())] ? 'bloqueado' : 'disponível'} para agendamentos.</div><button class="btn btn-sm btn-red" onclick="toggleMonthBlock('${barber.id}')">Bloquear mês inteiro</button>`}
     </div>
 
     <div style="margin-bottom:6px">
@@ -1967,8 +2020,11 @@ function addMonthsStr(base, n){
 }
 
 async function submitManualBooking(){
+  // Atualiza os dados antes de gravar, inclusive bloqueios mensais feitos em outro aparelho.
+  await refreshDB();
   const barber = db.barbers.find(b=>b.id===state.barberSession);
   const d = state.newAppt;
+  if(isMonthBlocked(barber.id, d.date)){ alert('Este mês está bloqueado para novos agendamentos.'); return; }
   const name = (document.getElementById('manName').value||'').trim();
   const phone = (document.getElementById('manPhone').value||'').trim();
   if(!name){ alert('Informe o nome do cliente.'); return; }
