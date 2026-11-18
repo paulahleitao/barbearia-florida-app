@@ -1598,10 +1598,10 @@ async function toggleMonthBlock(barberId){
 }
 
 function renderHolidayHours(barber){
-  const dates = Array.from({length:7},(_,i)=>addDaysStr('2026-12-17',i));
+  const dates = Array.from({length:8},(_,i)=>addDaysStr('2026-12-17',i));
   return `
     <div class="card" style="margin-bottom:16px">
-      <div class="name" style="margin-bottom:4px">🎄 Horários especiais — Natal (17 a 23/12/2026)</div>
+      <div class="name" style="margin-bottom:4px">🎄 Horários especiais — Natal (17 a 24/12/2026)</div>
       <div class="sub" style="margin-bottom:12px">Configure cada dia separadamente. Os horários especiais substituem a escala semanal somente nessa data e serão usados para liberar os horários na agenda dos clientes.</div>
       ${dates.map(date=>{
         const override = db.dayOverrides[dayOverrideKey(barber.id,date)];
