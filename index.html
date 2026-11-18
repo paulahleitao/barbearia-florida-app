@@ -1597,6 +1597,55 @@ async function toggleMonthBlock(barberId){
   render();
 }
 
+function renderHolidayHours(barber){
+  const dates = Array.from({length:7},(_,i)=>addDaysStr('2026-12-17',i));
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="name" style="margin-bottom:4px">🎄 Horários especiais — Natal (17 a 23/12/2026)</div>
+      <div class="sub" style="margin-bottom:12px">Configure cada dia separadamente. Os horários especiais substituem a escala semanal somente nessa data e serão usados para liberar os horários na agenda dos clientes.</div>
+      ${dates.map(date=>{
+        const override = db.dayOverrides[dayOverrideKey(barber.id,date)];
+        const hours = override && override.mode==='open' ? {start:override.workStart,end:override.workEnd} : getEffectiveHours(barber.id,date);
+        const start = hours ? minToLabel(hours.start) : '09:00';
+        const end = hours ? minToLabel(hours.end) : '18:00';
+        const closed = !!(override && override.mode==='closed');
+        return `<div style="padding:10px 0;border-top:1px solid var(--line, #ddd)">
+          <div class="row" style="margin-bottom:8px;align-items:center">
+            <div class="grow"><div class="name">${capFirst(new Date(date+'T00:00:00').toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'2-digit'}))}</div>
+              <div class="sub">${override ? (closed ? 'Fechado neste dia' : 'Horário especial salvo') : 'Usando agenda semanal'}</div></div>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap"><input id="holidayClosed_${date}" type="checkbox" ${closed?'checked':''} onchange="toggleHolidayInputs('${date}')"> Fechado</label>
+          </div>
+          <div class="grid2">
+            <div><label class="field-label">Início</label><input id="holidayStart_${date}" type="time" value="${start}" ${closed?'disabled':''}></div>
+            <div><label class="field-label">Término</label><input id="holidayEnd_${date}" type="time" value="${end}" ${closed?'disabled':''}></div>
+          </div>
+          <div class="flexbtns" style="margin-top:8px">
+            <button class="btn btn-sm btn-gold" onclick="saveHolidayHours('${barber.id}','${date}')">Salvar dia</button>
+            ${override ? `<button class="btn btn-sm btn-outline" onclick="resetDayOverride('${barber.id}','${date}')">Voltar à agenda normal</button>` : ''}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+function toggleHolidayInputs(date){
+  const closed = document.getElementById('holidayClosed_'+date).checked;
+  document.getElementById('holidayStart_'+date).disabled = closed;
+  document.getElementById('holidayEnd_'+date).disabled = closed;
+}
+async function saveHolidayHours(barberId,date){
+  const closed = document.getElementById('holidayClosed_'+date).checked;
+  if(closed){
+    db.dayOverrides[dayOverrideKey(barberId,date)] = {mode:'closed'};
+  } else {
+    const s = parseHHMM(document.getElementById('holidayStart_'+date).value);
+    const e = parseHHMM(document.getElementById('holidayEnd_'+date).value);
+    if(s==null||e==null||e<=s){ alert('Informe um horário de início e término válidos.'); return; }
+    db.dayOverrides[dayOverrideKey(barberId,date)] = {mode:'open',workStart:s,workEnd:e};
+  }
+  await saveDB();
+  render();
+}
+
 function renderConfigTab(barber){
   const dayLabels = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
   const groups = barber.scheduleGroups || [];
@@ -1642,6 +1691,8 @@ function renderConfigTab(barber){
       ${groupsHtml}
       <button class="btn btn-outline" onclick="addScheduleGroup()">+ Adicionar dias e horário</button>
     </div>
+
+    ${renderHolidayHours(barber)}
 
     <div class="card" style="margin-bottom:16px">
       <div class="name" style="margin-bottom:4px">☕ Bloqueios fixos (toda semana)</div>
