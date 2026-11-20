@@ -1174,21 +1174,14 @@ function renderAgendaTab(barber){
     <h1 class="page">Agenda</h1>
     ${renderBarberCalendar(barber, date)}
     ${renderAvailabilityPreview(barber)}
-    <button class="btn btn-gold" style="margin:12px 0 16px" onclick="startNewAppt()">+ Novo agendamento ${date>=todayStr()&&date!==todayStr()?'em '+prettyDate(date):'manual'}</button>
-    <div class="name" style="margin-bottom:2px">${prettyDate(date)}</div>
-    <div class="sub" style="margin-bottom:10px">${dayHoursLabel(barber.id, date)}</div>
+    <div class="name" style="margin:16px 0 8px">Agendados — ${prettyDate(date)}</div>
     ${items}`;
 }
-/* Abre o agendamento manual já no dia que o barbeiro está olhando na Agenda
-   (ex: abriu dezembro, tocou no dia 22 → o agendamento já vem para 22/12). */
+/* Abre o agendamento manual no dia que o barbeiro está olhando na Agenda (sem horário escolhido ainda). */
 function startNewAppt(){
   const t = todayStr();
   const sel = (state.barberDate && state.barberDate>=t) ? state.barberDate : t;
-  if(!state.newAppt){
-    state.newAppt = {date: sel};
-  } else if(state.newAppt.slot==null){
-    state.newAppt.date = sel;
-  }
+  state.newAppt = {date: sel};
   go('barberNewAppt');
 }
 /* ---------------- FINANCEIRO ---------------- */
@@ -1476,33 +1469,48 @@ function renderFinYear(barber){
     ${expensesCardHtml(barber, yearFrom, yearTo)}
     ${bestWorstHtml}`;
 }
+/* Painel principal da Agenda: escolhe o dia (faixa de 45+ dias, ou o calendário do mês acima — os dois
+   ficam sincronizados), vê os horários livres e TOCA NUM HORÁRIO para agendar. Mostra a visão do
+   barbeiro: mesmo com o mês bloqueado para clientes, os horários aparecem para ele poder agendar. */
 function renderAvailabilityPreview(barber){
-  if(!state.availDate) state.availDate = todayStr();
-  const availDate = state.availDate;
-
-  const stripHtml = barberDateStrip(barber.id, availDate, 'selectAvailDate', {badge: d=>{
-    const free = getSlots(barber.id, d, 30, 30).length;
+  const date = state.barberDate || todayStr();
+  const t = todayStr();
+  const stripHtml = barberDateStrip(barber.id, date, 'setBarberDate', {badge: d=>{
+    if(d<t) return '';
+    const ctx = barberBookingContext(barber.id, d);
+    if(ctx.dayClosed) return `<div class="calbadges" style="margin-top:2px"><span class="calbadge" style="background:var(--lead)">–</span></div>`;
+    const free = getBarberSlots(barber.id, d, 30).length;
     return `<div class="calbadges" style="margin-top:2px">${free>0?`<span class="calbadge green">${free}</span>`:`<span class="calbadge orange">0</span>`}</div>`;
   }});
-
-  const dObj = new Date(availDate+'T00:00:00');
-  const slots = getSlots(barber.id, availDate, 30, 30);
-  const dayLabel = capFirst(dObj.toLocaleDateString('pt-BR',{weekday:'long', day:'2-digit', month:'long'}));
-  const slotsHtml = slots.length
-    ? '<div class="slotgrid">'+slots.map(m=>`<div class="slotbtn" style="cursor:default">${minToLabel(m)}</div>`).join('')+'</div>'
-    : '<div class="empty">Sem horários livres nesse dia.</div>';
-
+  const ctx = barberBookingContext(barber.id, date);
+  const dayLabel = capFirst(new Date(date+'T00:00:00').toLocaleDateString('pt-BR',{weekday:'long', day:'2-digit', month:'long'}));
+  let body;
+  if(date < t){
+    body = '<div class="empty">Esse dia já passou.</div>';
+  } else if(ctx.dayClosed){
+    body = `<div class="empty" style="padding:16px 10px">Dia fechado na sua agenda.</div>
+      <button class="btn btn-outline" onclick="startNewAppt()">Agendar mesmo assim</button>`;
+  } else {
+    const slots = getBarberSlots(barber.id, date, 30);
+    body = slots.length
+      ? `<div class="sub" style="margin-bottom:8px">👆 Toque num horário para agendar</div>
+         <div class="slotgrid">${slots.map(m=>`<div class="slotbtn" onclick="quickBook('${date}',${m})">${minToLabel(m)}</div>`).join('')}</div>`
+      : `<div class="empty" style="padding:16px 10px">Sem horários livres nesse dia.</div>
+         <button class="btn btn-outline" onclick="startNewAppt()">Encaixar mesmo assim</button>`;
+  }
   return `
     <div class="card">
-      <div class="name" style="margin-bottom:8px">Disponibilidade</div>
+      <div class="name" style="margin-bottom:8px">Horários livres</div>
       ${stripHtml}
-      <div class="sub" style="margin-bottom:8px">${dayLabel} · ${dayHoursLabel(barber.id, availDate)} · ${slots.length} horário${slots.length===1?'':'s'} livre${slots.length===1?'':'s'} (blocos de 30min)</div>
-      ${slotsHtml}
+      <div class="sub" style="margin-bottom:4px"><b style="color:var(--ink)">${dayLabel}</b> · ${dayHoursLabel(barber.id, date)}</div>
+      ${ctx.monthBlocked && date>=t ? '<div class="sub" style="margin-bottom:8px">🔒 Só você vê esses horários enquanto o mês estiver bloqueado para clientes.</div>' : ''}
+      ${body}
     </div>`;
 }
-function selectAvailDate(d){
-  state.availDate = d;
-  render();
+/* Toque num horário livre da Agenda → abre o agendamento já com dia e horário escolhidos. */
+function quickBook(date, slot){
+  state.newAppt = {date, slot};
+  go('barberNewAppt');
 }
 function renderBarberCalendar(barber, selectedDate){
   if(!state.barberCalMonth){
@@ -2170,19 +2178,42 @@ function renderBarberNewAppt(){
   if(!state.newAppt) state.newAppt = {date: todayStr()};
   const draft = state.newAppt;
   const serviceOpts = db.services.map(s=>`<option value="${s.id}" ${draft.serviceId===s.id?'selected':''}>${esc(s.name)} — ${s.duration}min — R$${s.price}</option>`).join('');
-  let slotHtml = '';
-  let encaixeHtml = '';
-  if(draft.serviceId){
-    const service = db.services.find(s=>s.id===draft.serviceId);
-    const slots = getBarberSlots(barber.id, draft.date, service.duration);
-    slotHtml = slots.length
-      ? '<div class="slotgrid">'+slots.map(m=>`<div class="slotbtn ${draft.slot===m && !draft.forceOverlap?'active':''}" onclick="pickManualSlot(${m})">${minToLabel(m)}</div>`).join('')+'</div>'
+  const service = draft.serviceId ? db.services.find(s=>s.id===draft.serviceId) : null;
+  const duration = service ? service.duration : 30;
+  const freeSlots = getBarberSlots(barber.id, draft.date, duration);
+  const fits = draft.slot!=null && (draft.forceOverlap || freeSlots.includes(draft.slot));
+  /* Fluxo: se o dia e horário já vieram escolhidos da Agenda, eles aparecem resumidos no topo
+     e o barbeiro só preenche cliente e serviço. A grade de dias/horários só aparece se ele tocar
+     em "Trocar", se ainda não escolheu horário, ou se o serviço escolhido não couber no horário. */
+  const showStrip = draft.slot==null || !!draft.changingTime;
+  const showGrid = showStrip || (service && !fits);
+  const dateTitle = capFirst(new Date(draft.date+'T00:00:00').toLocaleDateString('pt-BR',{weekday:'long', day:'2-digit', month:'long'}));
+
+  const summaryHtml = (draft.slot!=null && !draft.changingTime) ? `
+    <div class="card" style="border-color:var(--gold)">
+      <div class="row" style="align-items:flex-start">
+        <div class="grow">
+          <div class="sub">Dia e horário</div>
+          <div class="name" style="font-size:18px">${dateTitle}</div>
+          <div style="font-family:'Oswald';font-weight:700;font-size:26px;color:var(--gold)">${minToLabel(draft.slot)}${service?`<span style="font-size:15px;color:var(--ink-dim)"> até ${minToLabel(draft.slot+duration)}</span>`:''}</div>
+          <div class="sub">${dayHoursLabel(barber.id, draft.date)}${draft.forceOverlap?' · encaixe':''}</div>
+        </div>
+        <button class="btn btn-sm btn-outline" style="flex:none" onclick="state.newAppt.changingTime=true;render()">Trocar</button>
+      </div>
+      ${(service && !fits) ? `<div class="sub" style="margin-top:8px;color:var(--pole-red)">⚠️ ${esc(service.name)} (${duration} min) não cabe às ${minToLabel(draft.slot)} nesse dia. Escolha outro horário abaixo.</div>` : ''}
+    </div>
+    ${barberBookingWarningHtml(barber.id, draft.date)}` : '';
+
+  let pickHtml = '';
+  if(showGrid){
+    const slotsGrid = freeSlots.length
+      ? '<div class="slotgrid">'+freeSlots.map(m=>`<div class="slotbtn ${draft.slot===m && !draft.forceOverlap?'active':''}" onclick="pickManualSlot(${m})">${minToLabel(m)}</div>`).join('')+'</div>'
       : '<div class="empty">Sem horários livres nesse dia.</div>';
     /* Encaixe: permite registrar um atendimento em qualquer horário, mesmo que já haja
        outro agendamento nele — útil quando um corte termina mais rápido e dá pra encaixar
        outro serviço dentro dos mesmos 30 minutos. */
     const showForm = !!draft.showCustomTime;
-    encaixeHtml = `
+    const encaixeHtml = service ? `
       <div style="margin-top:10px">
         <button type="button" class="btn btn-sm btn-outline" onclick="state.newAppt.showCustomTime=${!showForm};render()">${showForm?'Cancelar encaixe':'+ Encaixar em outro horário (mesmo ocupado)'}</button>
         ${showForm ? `
@@ -2190,27 +2221,32 @@ function renderBarberNewAppt(){
           <input id="manCustomTime" placeholder="ex: 14:15" inputmode="numeric" oninput="maskTimeInput(this)" value="${draft.customTimeText||''}">
           <button class="btn btn-sm btn-steel" style="margin-top:6px" onclick="pickManualCustomSlot()">Usar esse horário</button>
         ` : ''}
-        ${(draft.forceOverlap && draft.slot!=null) ? `<div class="sub" style="margin-top:8px;color:var(--gold)">Encaixe selecionado: ${minToLabel(draft.slot)}–${minToLabel(draft.slot+service.duration)} (pode se sobrepor a outro agendamento)</div>` : ''}
-      </div>`;
+      </div>` : '';
+    pickHtml = `
+      ${showStrip ? `
+        <label class="field-label" style="margin-top:6px">Dia</label>
+        ${barberDateStrip(barber.id, draft.date, 'pickManualDate', {picker:true})}
+        <div class="sub" style="margin-bottom:8px"><b style="color:var(--ink)">${dateTitle}</b> · ${dayHoursLabel(barber.id, draft.date)}</div>
+        ${barberBookingWarningHtml(barber.id, draft.date)}` : ''}
+      <label class="field-label" style="margin-top:6px">Horário${service?'':' (blocos de 30 min — ao escolher o serviço conferimos se cabe)'}</label>
+      ${slotsGrid}
+      ${encaixeHtml}`;
   }
-  const stripHtml = barberDateStrip(barber.id, draft.date, 'pickManualDate', {picker:true});
+
+  const canSave = !!service && fits;
   return `
-    <div class="topbar"><button class="link-btn" onclick="go('barberDashboard')">‹ Voltar</button></div>
+    <div class="topbar"><button class="link-btn" onclick="state.newAppt=null;go('barberDashboard')">‹ Voltar</button></div>
     <div class="content">
       <h1 class="page">Novo agendamento</h1>
+      ${summaryHtml}
       <label class="field-label">Cliente</label>
       <input id="manName" placeholder="Nome do cliente" value="${esc(draft.clientName||'')}" oninput="state.newAppt.clientName=this.value">
       <label class="field-label">WhatsApp do cliente</label>
-      <input id="manPhone" placeholder="11999998888" value="${esc(draft.clientPhone||'')}" oninput="state.newAppt.clientPhone=this.value">
+      <input id="manPhone" placeholder="11999998888" inputmode="tel" value="${esc(draft.clientPhone||'')}" oninput="state.newAppt.clientPhone=this.value">
       <label class="field-label">Serviço</label>
       <select onchange="pickManualService(this.value)"><option value="">Selecione</option>${serviceOpts}</select>
-      <label class="field-label">Data</label>
-      ${stripHtml}
-      <div class="sub" style="margin-bottom:8px">${prettyDate(draft.date)} · ${dayHoursLabel(barber.id, draft.date)}</div>
-      ${barberBookingWarningHtml(barber.id, draft.date)}
-      ${slotHtml}
-      ${encaixeHtml}
-      ${(draft.serviceId && draft.slot!=null) ? `
+      ${pickHtml}
+      ${canSave ? `
       <div class="card" style="margin-top:14px">
         <label class="field-label" style="margin:0 0 8px">Repetição</label>
         <select onchange="state.newAppt.repeatType=this.value;render()">
@@ -2229,12 +2265,21 @@ function renderBarberNewAppt(){
         <div class="sub">Vamos tentar criar o mesmo horário nos próximos meses. Se algum mês já estiver ocupado nesse horário, avisamos e pulamos ele.</div>
         ` : ''}
       </div>
-      <button class="btn btn-gold" style="margin-top:16px" onclick="submitManualBooking()">Salvar agendamento</button>` : ''}
+      <button class="btn btn-gold" style="margin-top:16px" onclick="submitManualBooking()">Salvar agendamento — ${prettyDate(draft.date)} às ${minToLabel(draft.slot)}</button>` : `
+      <div class="sub" style="margin-top:14px;text-align:center">${!service ? 'Escolha o serviço para salvar.' : 'Escolha um horário para salvar.'}</div>`}
     </div>`;
 }
-function pickManualDate(d){ state.newAppt = Object.assign({date:todayStr()}, state.newAppt, {date:d}); render(); }
-function pickManualService(sid){ state.newAppt = Object.assign({date:todayStr()}, state.newAppt, {serviceId:sid, slot:null, forceOverlap:false, showCustomTime:false}); render(); }
-function pickManualSlot(m){ state.newAppt.slot = m; state.newAppt.forceOverlap = false; render(); }
+function pickManualDate(d){
+  const n = state.newAppt || {};
+  n.date = d; n.slot = null; n.forceOverlap = false; n.changingTime = true;
+  state.newAppt = n; render();
+}
+function pickManualService(sid){
+  const n = state.newAppt || {date:todayStr()};
+  n.serviceId = sid || null; n.showCustomTime = false;
+  state.newAppt = n; render();
+}
+function pickManualSlot(m){ state.newAppt.slot = m; state.newAppt.forceOverlap = false; state.newAppt.changingTime = false; render(); }
 function pickManualCustomSlot(){
   const v = document.getElementById('manCustomTime').value;
   const m = parseHHMM(v);
@@ -2243,6 +2288,7 @@ function pickManualCustomSlot(){
   state.newAppt.forceOverlap = true;
   state.newAppt.showCustomTime = false;
   state.newAppt.customTimeText = v;
+  state.newAppt.changingTime = false;
   render();
 }
 function addMonthsStr(base, n){
@@ -2265,6 +2311,8 @@ async function submitManualBooking(){
   const phone = (document.getElementById('manPhone').value||'').trim();
   if(!name){ alert('Informe o nome do cliente.'); return; }
   const service = db.services.find(s=>s.id===d.serviceId);
+  if(!service){ alert('Escolha o serviço.'); return; }
+  if(d.slot==null){ alert('Escolha um horário.'); return; }
   /* Mês bloqueado ou dia fechado não impedem o barbeiro: só pedem confirmação. */
   if(!barberBookingConfirm(barber.id, d.date)) return;
   const ctx = barberBookingContext(barber.id, d.date);
@@ -2326,7 +2374,9 @@ async function submitManualBooking(){
     openWhats(phone, `Olá ${name}! Aqui é o ${barber.name}. Confirmando seu horário de ${service.name} em ${prettyDate(d.date)} às ${minToLabel(d.slot)}.${valorTxt}`);
   }
   state.newAppt = null;
-  go('barberDashboard');
+  state.barberDate = d.date;
+  state.barberCalMonth = null;
+  go('barberDashboard', {barberTab:'agenda'});
   if(skipped.length){
     setTimeout(()=>alert('Algumas datas da repetição estavam ocupadas ou fechadas nesse horário e foram puladas: '+skipped.join(', ')), 200);
   }
