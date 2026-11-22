@@ -1739,9 +1739,11 @@ async function toggleMonthBlock(barberId){
   render();
 }
 
+/* Dias do período especial de Natal/fim de ano: 17 a 24/12 + 30/12. Para incluir outro dia, é só acrescentar aqui. */
+const HOLIDAY_DATES = [...Array.from({length:8},(_,i)=>addDaysStr('2026-12-17',i)), '2026-12-30'];
 function renderHolidayHours(barber){
   // Depois da semana do Natal o bloco some sozinho da tela de Config (os dados continuam salvos).
-  if(todayStr() > '2026-12-24') return '';
+  if(todayStr() > HOLIDAY_DATES[HOLIDAY_DATES.length-1]) return '';
   /* O barbeiro pode ocultar o bloco quando terminar de configurar: os horários continuam valendo,
      só some da tela (fica uma linha discreta para reabrir). Salvo no banco, vale em qualquer aparelho. */
   if(barber.hideHolidayHours){
@@ -1751,12 +1753,12 @@ function renderHolidayHours(barber){
       <button class="link-btn" style="color:var(--gold);font-size:12px" onclick="setHolidayHidden(false)">Mostrar</button>
     </div>`;
   }
-  const dates = Array.from({length:8},(_,i)=>addDaysStr('2026-12-17',i));
+  const dates = HOLIDAY_DATES;
   if(!state.holidayDraft) state.holidayDraft = {};
   return `
     <div class="card" style="margin-bottom:16px">
       <div class="row" style="margin-bottom:4px;align-items:flex-start">
-        <div class="grow name">🎄 Horários especiais — Natal (17 a 24/12/2026)</div>
+        <div class="grow name">🎄 Horários especiais — Natal (17 a 24/12 e 30/12/2026)</div>
         <button class="btn btn-sm btn-outline" style="flex:none;padding:4px 10px;font-size:10px" onclick="setHolidayHidden(true)">Ocultar</button>
       </div>
       <div class="sub" style="margin-bottom:8px">Abertura e fechamento livres, de 00:00 até meia-noite (para fechar à meia-noite, coloque 00:00 no término).</div>
