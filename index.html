@@ -651,6 +651,10 @@ function renderClientDate(){
   const multi = c.items.length>1;
   const today = new Date(todayStr()+'T00:00:00');
   const maxDate = new Date(today); maxDate.setDate(maxDate.getDate()+30); // janela padrão de 31 dias (hoje + 30)
+  /* Dezembro/2026 inteiro liberado para os clientes (temporada de fim de ano). Depois de 31/12
+     volta sozinho à regra de 30 dias. O bloqueio de mês inteiro e os dias fechados continuam valendo. */
+  const openUntil = new Date(CLIENT_OPEN_UNTIL+'T00:00:00');
+  if(openUntil > maxDate) maxDate.setTime(openUntil.getTime());
   /* Dias com horário especial (ex: semana do Natal) ficam liberados mesmo se estiverem além
      dos 30 dias — sem abrir os dias comuns que ficam fora da janela. */
   const lastSpecial = lastSpecialOpenDate(c.barberId);
@@ -1739,6 +1743,8 @@ async function toggleMonthBlock(barberId){
   render();
 }
 
+/* Até quando os clientes podem agendar, além da regra de 30 dias: dezembro inteiro. */
+const CLIENT_OPEN_UNTIL = '2026-12-31';
 /* Dias do período especial de Natal/fim de ano: 17 a 24/12 + 30/12. Para incluir outro dia, é só acrescentar aqui. */
 const HOLIDAY_DATES = [...Array.from({length:8},(_,i)=>addDaysStr('2026-12-17',i)), '2026-12-30'];
 function renderHolidayHours(barber){
